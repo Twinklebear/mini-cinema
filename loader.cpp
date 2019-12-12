@@ -5,6 +5,7 @@
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
 #include "json.hpp"
+#include "stb_image.h"
 #include "util.h"
 
 Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
@@ -143,30 +144,6 @@ VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mp
     brick.brick.setParam("volumeClippingBoxLower", brick.bounds.lower);
     brick.brick.setParam("volumeClippingBoxUpper", brick.bounds.upper);
     brick.brick.commit();
-
-    brick.model = cpp::VolumetricModel(brick.brick);
-    cpp::TransferFunction tfn("piecewise_linear");
-    std::vector<vec3f> colors = {vec3f(0.f, 0.f, 1.f), vec3f(1.f, 0.f, 0.f)};
-    std::vector<float> opacities = {0.0001f, 1.f};
-
-    tfn.setParam("color", cpp::Data(colors));
-    tfn.setParam("opacity", cpp::Data(opacities));
-    // color the bricks by their rank, we pad the range out a bit to keep
-    // any brick from being completely transparent
-    vec2f value_range = vec2f(0, 256);
-    tfn.setParam("valueRange", value_range);
-    tfn.commit();
-    brick.model.setParam("transferFunction", tfn);
-    brick.model.setParam("samplingRate", 0.5f);
-    brick.model.commit();
-
-    brick.group = cpp::Group();
-    brick.group.setParam("volume", cpp::Data(brick.model));
-    brick.group.commit();
-
-    brick.instance = cpp::Instance(brick.group);
-    brick.instance.commit();
-
     return brick;
 }
 
@@ -191,5 +168,41 @@ std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
         }
     }
     return cameras;
+}
+
+std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string> &files,
+                                                  const vec2f &value_range)
+{
+    std::vector<cpp::TransferFunction> colormaps;
+    for (const auto &f : files) {
+        cpp::TransferFunction tfn("piecewise_linear");
+        int x, y, n;
+        uint8_t *data = stbi_load(f.c_str(), &x, &y, &n, 4);
+        if (!data) {
+            std::cerr << "[error]: failed to load image: " << f << "\n" << std::flush;
+            throw std::runtime_error("Failed to load " + f);
+        }
+
+        std::vector<vec3f> colors;
+        std::vector<float> opacities;
+        for (int i = 0; i < x; ++i) {
+            colors.emplace_back(
+                data[i * 4] / 255.f, data[i * 4 + 1] / 255.f, data[i * 4 + 2] / 255.f);
+            // If no alpha in the image, generate a linear ramp
+            if (n == 3) {
+                opacities.emplace_back(static_cast<float>(i) / x);
+            } else {
+                opacities.emplace_back(data[i * 4 + 3] / 255.f);
+            }
+        }
+        stbi_image_free(data);
+
+        tfn.setParam("color", cpp::Data(colors));
+        tfn.setParam("opacity", cpp::Data(opacities));
+        tfn.setParam("valueRange", value_range);
+        tfn.commit();
+        colormaps.push_back(tfn);
+    }
+    return colormaps;
 }
 

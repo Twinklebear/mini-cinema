@@ -17,9 +17,6 @@ using json = nlohmann::json;
 struct VolumeBrick {
     // the volume data itself
     cpp::Volume brick;
-    cpp::VolumetricModel model;
-    cpp::Group group;
-    cpp::Instance instance;
     // the bounds of the owned portion of data
     box3f bounds;
     // the full bounds of the owned portion + ghost voxels
@@ -53,5 +50,9 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
 
 VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mpi_size);
 
-std::vector<Camera> load_cameras(const std::vector<json> &camera_set, const box3f &world_bounds);
+std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
+                                 const box3f &world_bounds);
+
+std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string> &files,
+                                                  const vec2f &value_range);
 

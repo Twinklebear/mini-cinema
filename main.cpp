@@ -8,6 +8,8 @@
 #include "util.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #include "stb_image_write.h"
 
 using namespace ospray;
@@ -80,19 +82,40 @@ void render_images(const std::vector<std::string> &args)
         const std::string base_path = get_file_basepath(args[1]);
         if (base_path != args[1]) {
             config["volume"] = base_path + "/" + config["volume"].get<std::string>();
+            for (size_t i = 0; i < config["colormap"].size(); ++i) {
+                config["colormap"][i] =
+                    base_path + "/" + config["colormap"][i].get<std::string>();
+            }
         }
     }
 
-    VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
-
     world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["dimensions"]));
+    const vec2f value_range = get_vec<float, 2>(config["value_range"]);
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
+    const auto colormaps =
+        load_colormaps(config["colormap"].get<std::vector<std::string>>(), value_range);
+    const auto camera_set =
+        load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
 
     cpp::Camera camera("perspective");
     camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
 
+    VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
+
+    cpp::VolumetricModel model(brick.brick);
+    model.setParam("transferFunction", colormaps[0]);
+    model.setParam("samplingRate", 1.f);
+    model.commit();
+
+    cpp::Group group;
+    group.setParam("volume", cpp::Data(model));
+    group.commit();
+
+    cpp::Instance instance(group);
+    instance.commit();
+
     cpp::World world;
-    world.setParam("instance", cpp::Data(brick.instance));
+    world.setParam("instance", cpp::Data(instance));
     world.setParam("regions", cpp::Data(brick.bounds));
     world.commit();
 
@@ -100,27 +123,34 @@ void render_images(const std::vector<std::string> &args)
     cpp::Light ambient_light("ambient");
     ambient_light.commit();
 
+    // WILL TODO: mpi raycast progressive refinement/jittering is disabled?
+    // though after accumulation i do see some artifacts in scivis too
     cpp::Renderer renderer("mpi_raycast");
     renderer.setParam("light", cpp::Data(ambient_light));
     renderer.commit();
 
     cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
 
-    auto camera_set = load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
-    for (size_t i = 0; i < camera_set.size(); ++i) {
-        camera.setParam("position", camera_set[i].pos);
-        camera.setParam("direction", camera_set[i].dir);
-        camera.setParam("up", camera_set[i].up);
-        camera.commit();
+    for (size_t j = 0; j < colormaps.size(); ++j) {
+        model.setParam("transferFunction", colormaps[j]);
+        model.commit();
 
-        framebuffer.clear();
-        // TODO: render async
-        framebuffer.renderFrame(renderer, camera, world);
+        for (size_t i = 0; i < camera_set.size(); ++i) {
+            camera.setParam("position", camera_set[i].pos);
+            camera.setParam("direction", camera_set[i].dir);
+            camera.setParam("up", camera_set[i].up);
+            camera.commit();
 
-        if (mpi_rank == 0) {
-            uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-            const std::string fname = "mini-cinema_" + std::to_string(i) + ".jpg";
-            stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+            framebuffer.clear();
+            // TODO: render async
+            framebuffer.renderFrame(renderer, camera, world);
+
+            if (mpi_rank == 0) {
+                uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
+                const std::string fname = "mini-cinema-tfn" + std::to_string(j) + "-cam" +
+                                          std::to_string(i) + ".jpg";
+                stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+            }
         }
     }
 }

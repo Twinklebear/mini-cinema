@@ -1,9 +1,10 @@
 {
     "volume": "foot_256x256x256_uint8.raw",
+    "value_range": [0, 255],
     "dimensions": [256, 256, 256],
     "data_type": "uint8",
     "grid_spacing": [1, 1, 1],
-    "image_size": [1280, 720],
+    "image_size": [1024, 1024],
     "camera": [
         {
             "pos": [128, 128, -256],
@@ -16,13 +17,13 @@
             "up": [0, 1, 0]
         },
         {
-            "pos": [-128, -128, 128],
-            "dir": [1, 1, 0],
-            "up": [0, 1, 0]
-        },
-        {
-            "orbit": 8
+            "orbit": 2
         }
+    ],
+    "colormap": [
+            "ice_fire.png",
+            "linear_green_transparent.png",
+            "ext_cool_warm.png"
     ]
 }
 
