@@ -1,0 +1,7 @@
+{
+    "volume": "foot_256x256x256_uint8.raw",
+    "dimensions": [256, 256, 256],
+    "data_type": "uint8",
+    "grid_spacing": [1, 1, 1]
+}
+

@@ -29,3 +29,4 @@ readme.pdf
 .idea/
 premake.local.*
 cmake-build*/
+*.raw
