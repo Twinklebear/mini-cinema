@@ -120,7 +120,6 @@ void render_images(const std::vector<std::string> &args)
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
         material.setParam("Kd", get_vec<float, 3>(config["isosurface_color"]));
-        std::cout << "color: " << get_vec<float, 3>(config["isosurface_color"]) << "\n";
     } else {
         material.setParam("Kd", vec3f(1.f));
     }

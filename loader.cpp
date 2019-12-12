@@ -4,10 +4,15 @@
 #include <mpi.h>
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
+#include <vtkDoubleArray.h>
+#include <vtkFloatArray.h>
 #include <vtkFlyingEdges3D.h>
 #include <vtkImageData.h>
+#include <vtkPointData.h>
 #include <vtkSmartPointer.h>
 #include <vtkTriangle.h>
+#include <vtkUnsignedCharArray.h>
+#include <vtkUnsignedShortArray.h>
 #include "json.hpp"
 #include "stb_image.h"
 #include "util.h"
@@ -213,32 +218,41 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeBrick &brick)
 {
     std::vector<cpp::Geometry> isosurfaces;
-    int voxel_type = -1;
     const std::string voxel_type_string = config["data_type"].get<std::string>();
+    vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
-        voxel_type = VTK_UNSIGNED_CHAR;
+        auto arr = vtkSmartPointer<vtkUnsignedCharArray>::New();
+        arr->SetArray(brick.voxel_data->data(), brick.voxel_data->size(), 1);
+        data_array = arr;
     } else if (voxel_type_string == "uint16") {
-        voxel_type = VTK_UNSIGNED_SHORT;
+        auto arr = vtkSmartPointer<vtkUnsignedShortArray>::New();
+        arr->SetArray(reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
+                      brick.voxel_data->size() / sizeof(uint16_t),
+                      1);
+        data_array = arr;
     } else if (voxel_type_string == "float32") {
-        voxel_type = VTK_FLOAT;
+        auto arr = vtkSmartPointer<vtkFloatArray>::New();
+        arr->SetArray(reinterpret_cast<float *>(brick.voxel_data->data()),
+                      brick.voxel_data->size() / sizeof(float),
+                      1);
+        data_array = arr;
     } else if (voxel_type_string == "float64") {
-        voxel_type = VTK_DOUBLE;
+        auto arr = vtkSmartPointer<vtkDoubleArray>::New();
+        arr->SetArray(reinterpret_cast<double *>(brick.voxel_data->data()),
+                      brick.voxel_data->size() / sizeof(double),
+                      1);
+        data_array = arr;
     } else {
         throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
     }
 
+    const vec3f grid_spacing = get_vec<float, 3>(config["grid_spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
-    img_data->AllocateScalars(voxel_type, 1);
+    img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
     img_data->SetOrigin(
         brick.ghost_bounds.lower.x, brick.ghost_bounds.lower.y, brick.ghost_bounds.lower.z);
-
-    // TODO: Better to share the pointer with the brick instead of doing this copy
-    // TODO: use the VTKAOSData array stuff to make a view into our existing data
-    std::memcpy(
-        img_data->GetScalarPointer(), brick.voxel_data->data(), brick.voxel_data->size());
-
-    img_data->PrintSelf(std::cout, vtkIndent(0));
+    img_data->GetPointData()->SetScalars(data_array);
 
     auto isovals = config["isovalue"].get<std::vector<float>>();
     for (const auto &val : isovals) {
