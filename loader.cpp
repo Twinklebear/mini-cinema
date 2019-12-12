@@ -167,8 +167,6 @@ std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
         const auto &c = camera_set[i];
         if (c.find("orbit") != c.end()) {
             const float orbit_radius = length(world_bounds.size()) * 0.75f;
-            std::cout << "orbit radius: " << orbit_radius
-                      << ", points: " << c["orbit"].get<int>() << "\n";
             auto orbit_points = generate_fibonacci_sphere(c["orbit"].get<int>(), orbit_radius);
             for (const auto &p : orbit_points) {
                 cameras.emplace_back(p + world_bounds.center(), normalize(-p), vec3f(0, 1, 0));
