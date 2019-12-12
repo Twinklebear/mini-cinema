@@ -4,6 +4,11 @@
 #include <mpi.h>
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
+#include "json.hpp"
+#include "stb_image.h"
+#include "util.h"
+
+#ifdef VTK_FOUND
 #include <vtkDoubleArray.h>
 #include <vtkFloatArray.h>
 #include <vtkFlyingEdges3D.h>
@@ -13,9 +18,7 @@
 #include <vtkTriangle.h>
 #include <vtkUnsignedCharArray.h>
 #include <vtkUnsignedShortArray.h>
-#include "json.hpp"
-#include "stb_image.h"
-#include "util.h"
+#endif
 
 Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
     : pos(pos), dir(dir), up(up)
@@ -218,6 +221,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeBrick &brick)
 {
     std::vector<cpp::Geometry> isosurfaces;
+#ifdef VTK_FOUND
     const std::string voxel_type_string = config["data_type"].get<std::string>();
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
@@ -291,6 +295,10 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeB
         isosurfaces.push_back(mesh);
         std::cout << "Isosurface at " << val << " has " << indices.size() << " triangles\n";
     }
+#else
+    std::cerr << "[warning]: Scene requested isosurface geometry, but app was not compiled "
+                 "with VTK to support explicit isosurfaces.\n";
+#endif
     return isosurfaces;
 }
 
