@@ -102,6 +102,13 @@ void render_images(const std::vector<std::string> &args)
 
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
 
+    // We don't use the implicit isosurfaces geometry because I want to test
+    // on non-volume objects, e.g. explicit triangle surfaces
+    std::vector<cpp::Geometry> isosurfaces;
+    if (config.find("isovalue") != config.end()) {
+        isosurfaces = extract_isosurfaces(config, brick);
+    }
+
     cpp::VolumetricModel model(brick.brick);
     model.setParam("transferFunction", colormaps[0]);
     model.setParam("samplingRate", 1.f);
@@ -109,15 +116,20 @@ void render_images(const std::vector<std::string> &args)
 
     cpp::Group group;
     group.setParam("volume", cpp::Data(model));
+
+    cpp::Material material("scivis", "default");
+    if (config.find("isosurface_color") != config.end()) {
+        material.setParam("Kd", get_vec<float, 3>(config["isosurface_color"]));
+        std::cout << "color: " << get_vec<float, 3>(config["isosurface_color"]) << "\n";
+    } else {
+        material.setParam("Kd", vec3f(1.f));
+    }
+    material.commit();
+
     group.commit();
 
     cpp::Instance instance(group);
     instance.commit();
-
-    cpp::World world;
-    world.setParam("instance", cpp::Data(instance));
-    world.setParam("regions", cpp::Data(brick.bounds));
-    world.commit();
 
     // create and setup an ambient light
     cpp::Light ambient_light("ambient");
@@ -127,29 +139,53 @@ void render_images(const std::vector<std::string> &args)
     // though after accumulation i do see some artifacts in scivis too
     cpp::Renderer renderer("mpi_raycast");
     renderer.setParam("light", cpp::Data(ambient_light));
+    if (config.find("background_color") != config.end()) {
+        renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
+    }
     renderer.commit();
 
     cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
 
-    for (size_t j = 0; j < colormaps.size(); ++j) {
-        model.setParam("transferFunction", colormaps[j]);
-        model.commit();
+    for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
+        if (!isosurfaces.empty()) {
+            cpp::GeometricModel geom_model(isosurfaces[k]);
+            geom_model.setParam("material", material);
+            geom_model.commit();
+            group.setParam("geometry", cpp::Data(geom_model));
+            group.commit();
 
-        for (size_t i = 0; i < camera_set.size(); ++i) {
-            camera.setParam("position", camera_set[i].pos);
-            camera.setParam("direction", camera_set[i].dir);
-            camera.setParam("up", camera_set[i].up);
-            camera.commit();
+            instance = cpp::Instance(group);
+            instance.commit();
+        }
 
-            framebuffer.clear();
-            // TODO: render async
-            framebuffer.renderFrame(renderer, camera, world);
+        cpp::World world;
+        world.setParam("instance", cpp::Data(instance));
+        world.setParam("regions", cpp::Data(brick.bounds));
+        world.commit();
 
-            if (mpi_rank == 0) {
-                uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-                const std::string fname = "mini-cinema-tfn" + std::to_string(j) + "-cam" +
-                                          std::to_string(i) + ".jpg";
-                stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+        for (size_t j = 0; j < colormaps.size(); ++j) {
+            model.setParam("transferFunction", colormaps[j]);
+            model.commit();
+
+            for (size_t i = 0; i < camera_set.size(); ++i) {
+                camera.setParam("position", camera_set[i].pos);
+                camera.setParam("direction", camera_set[i].dir);
+                camera.setParam("up", camera_set[i].up);
+                camera.commit();
+
+                framebuffer.clear();
+                // TODO: render async
+                framebuffer.renderFrame(renderer, camera, world);
+
+                if (mpi_rank == 0) {
+                    uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
+                    std::string fname = "mini-cinema-";
+                    if (!isosurfaces.empty()) {
+                        fname += "iso" + std::to_string(k);
+                    }
+                    fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + ".jpg";
+                    stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+                }
             }
         }
     }

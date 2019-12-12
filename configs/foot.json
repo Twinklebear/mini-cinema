@@ -4,7 +4,7 @@
     "dimensions": [256, 256, 256],
     "data_type": "uint8",
     "grid_spacing": [1, 1, 1],
-    "image_size": [1024, 1024],
+    "image_size": [512, 512],
     "camera": [
         {
             "pos": [128, 128, -256],
@@ -24,6 +24,9 @@
             "ice_fire.png",
             "linear_green_transparent.png",
             "ext_cool_warm.png"
-    ]
+    ],
+    "isovalue": [128, 200],
+    "isosurface_color": [0.2, 0.5, 1.0],
+    "background_color": [1, 1, 1]
 }
 

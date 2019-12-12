@@ -4,6 +4,10 @@
 #include <mpi.h>
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
+#include <vtkFlyingEdges3D.h>
+#include <vtkImageData.h>
+#include <vtkSmartPointer.h>
+#include <vtkTriangle.h>
 #include "json.hpp"
 #include "stb_image.h"
 #include "util.h"
@@ -54,51 +58,51 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
     return faces;
 }
 
-VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mpi_size)
+VolumeBrick load_volume_brick(const json &config, const int mpi_rank, const int mpi_size)
 {
     VolumeBrick brick;
 
-    const std::string volume_file = json["volume"].get<std::string>();
-    const vec3i volume_dims = get_vec<int, 3>(json["dimensions"]);
+    const std::string volume_file = config["volume"].get<std::string>();
+    const vec3i volume_dims = get_vec<int, 3>(config["dimensions"]);
     const vec3i grid = compute_grid(mpi_size);
     const vec3i brick_id(
         mpi_rank % grid.x, (mpi_rank / grid.x) % grid.y, mpi_rank / (grid.x * grid.y));
 
-    const vec3i brick_volume_dims = volume_dims / grid;
+    brick.dims = volume_dims / grid;
 
-    const vec3f brick_lower = brick_id * brick_volume_dims;
-    const vec3f brick_upper = brick_id * brick_volume_dims + brick_volume_dims;
+    const vec3f brick_lower = brick_id * brick.dims;
+    const vec3f brick_upper = brick_id * brick.dims + brick.dims;
 
     brick.bounds = box3f(brick_lower, brick_upper);
 
-    vec3i brick_full_dims = brick_volume_dims;
+    brick.full_dims = brick.dims;
     vec3i brick_read_offset = brick_lower;
     brick.ghost_bounds = brick.bounds;
     {
         const auto ghost_faces = compute_ghost_faces(brick_id, grid);
         for (size_t i = 0; i < 3; ++i) {
             if (ghost_faces[i] & NEG_FACE) {
-                brick_full_dims[i] += 1;
+                brick.full_dims[i] += 1;
                 brick.ghost_bounds.lower[i] -= 1.f;  // todo: base on grid spacing
                 brick_read_offset[i] -= 1;
             }
             if (ghost_faces[i] & POS_FACE) {
-                brick_full_dims[i] += 1;
+                brick.full_dims[i] += 1;
                 brick.ghost_bounds.upper[i] += 1.f;  // todo: base on grid spacing
             }
         }
     }
 
     brick.brick = cpp::Volume("structured_regular");
-    brick.brick.setParam("dimensions", brick_full_dims);
+    brick.brick.setParam("dimensions", brick.full_dims);
     brick.brick.setParam("gridOrigin", brick.ghost_bounds.lower);
-    brick.brick.setParam("gridSpacing", get_vec<int, 3>(json["grid_spacing"]));
+    brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
 
     // Load the sub-bricks using MPI I/O
     {
         size_t voxel_size = 0;
         MPI_Datatype voxel_type;
-        const std::string voxel_type_string = json["data_type"].get<std::string>();
+        const std::string voxel_type_string = config["data_type"].get<std::string>();
         if (voxel_type_string == "uint8") {
             voxel_type = MPI_UNSIGNED_CHAR;
             voxel_size = 1;
@@ -116,12 +120,12 @@ VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mp
         }
 
         const size_t n_voxels =
-            size_t(brick_full_dims.x) * size_t(brick_full_dims.y) * size_t(brick_full_dims.z);
+            size_t(brick.full_dims.x) * size_t(brick.full_dims.y) * size_t(brick.full_dims.z);
         brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
         MPI_Datatype brick_type;
         MPI_Type_create_subarray(3,
                                  &volume_dims.x,
-                                 &brick_full_dims.x,
+                                 &brick.full_dims.x,
                                  &brick_read_offset.x,
                                  MPI_ORDER_FORTRAN,
                                  voxel_type,
@@ -204,5 +208,75 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         colormaps.push_back(tfn);
     }
     return colormaps;
+}
+
+std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeBrick &brick)
+{
+    std::vector<cpp::Geometry> isosurfaces;
+    int voxel_type = -1;
+    const std::string voxel_type_string = config["data_type"].get<std::string>();
+    if (voxel_type_string == "uint8") {
+        voxel_type = VTK_UNSIGNED_CHAR;
+    } else if (voxel_type_string == "uint16") {
+        voxel_type = VTK_UNSIGNED_SHORT;
+    } else if (voxel_type_string == "float32") {
+        voxel_type = VTK_FLOAT;
+    } else if (voxel_type_string == "float64") {
+        voxel_type = VTK_DOUBLE;
+    } else {
+        throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
+    }
+
+    vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
+    img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
+    img_data->AllocateScalars(voxel_type, 1);
+    img_data->SetOrigin(
+        brick.ghost_bounds.lower.x, brick.ghost_bounds.lower.y, brick.ghost_bounds.lower.z);
+
+    // TODO: Better to share the pointer with the brick instead of doing this copy
+    // TODO: use the VTKAOSData array stuff to make a view into our existing data
+    std::memcpy(
+        img_data->GetScalarPointer(), brick.voxel_data->data(), brick.voxel_data->size());
+
+    img_data->PrintSelf(std::cout, vtkIndent(0));
+
+    auto isovals = config["isovalue"].get<std::vector<float>>();
+    for (const auto &val : isovals) {
+        std::vector<vec3f> vertices;
+        std::vector<vec3ui> indices;
+
+        vtkSmartPointer<vtkFlyingEdges3D> fedges = vtkSmartPointer<vtkFlyingEdges3D>::New();
+        fedges->SetInputData(img_data);
+        fedges->SetNumberOfContours(1);
+        fedges->SetValue(0, val);
+        fedges->SetComputeNormals(false);
+        fedges->Update();
+        vtkPolyData *isosurf = fedges->GetOutput();
+
+        vertices.reserve(isosurf->GetNumberOfCells());
+        indices.reserve(isosurf->GetNumberOfCells());
+
+        for (size_t i = 0; i < isosurf->GetNumberOfCells(); ++i) {
+            vtkTriangle *tri = dynamic_cast<vtkTriangle *>(isosurf->GetCell(i));
+            if (tri->ComputeArea() == 0.0) {
+                continue;
+            }
+            vec3ui tids;
+            for (size_t v = 0; v < 3; ++v) {
+                const double *pt = isosurf->GetPoint(tri->GetPointId(v));
+                const vec3f vert(pt[0], pt[1], pt[2]);
+                tids[v] = vertices.size();
+                vertices.push_back(vert);
+            }
+            indices.push_back(tids);
+        }
+        cpp::Geometry mesh("mesh");
+        mesh.setParam("vertex.position", cpp::Data(vertices));
+        mesh.setParam("index", cpp::Data(indices));
+        mesh.commit();
+        isosurfaces.push_back(mesh);
+        std::cout << "Isosurface at " << val << " has " << indices.size() << " triangles\n";
+    }
+    return isosurfaces;
 }
 
