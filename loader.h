@@ -28,6 +28,14 @@ struct VolumeBrick {
     std::shared_ptr<std::vector<uint8_t>> voxel_data;
 };
 
+struct Camera {
+    vec3f pos;
+    vec3f dir;
+    vec3f up;
+
+    Camera(const vec3f &pos, const vec3f &dir, const vec3f &up);
+};
+
 bool compute_divisor(int x, int &divisor);
 
 /* Compute an X x Y x Z grid to have 'num' grid cells,
@@ -45,13 +53,5 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
 
 VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mpi_size);
 
-template <typename T, size_t N>
-inline vec_t<T, N> get_vec(const json &j)
-{
-    vec_t<T, N> v;
-    for (size_t i = 0; i < N; ++i) {
-        v[i] = j[i].get<T>();
-    }
-    return v;
-}
+std::vector<Camera> load_cameras(const std::vector<json> &camera_set, const box3f &world_bounds);
 

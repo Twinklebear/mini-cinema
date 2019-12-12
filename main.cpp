@@ -105,14 +105,12 @@ void render_images(const std::vector<std::string> &args)
     renderer.commit();
 
     cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-    auto camera_set = config["camera"].get<std::vector<json>>();
+
+    auto camera_set = load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
     for (size_t i = 0; i < camera_set.size(); ++i) {
-        const vec3f cam_pos = get_vec<float, 3>(camera_set[i]["pos"]);
-        const vec3f cam_dir = get_vec<float, 3>(camera_set[i]["dir"]);
-        const vec3f cam_up = get_vec<float, 3>(camera_set[i]["up"]);
-        camera.setParam("position", cam_pos);
-        camera.setParam("direction", cam_dir);
-        camera.setParam("up", cam_up);
+        camera.setParam("position", camera_set[i].pos);
+        camera.setParam("direction", camera_set[i].dir);
+        camera.setParam("up", camera_set[i].up);
         camera.commit();
 
         framebuffer.clear();

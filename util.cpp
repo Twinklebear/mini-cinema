@@ -47,7 +47,7 @@ bool starts_with(const std::string &str, const std::string &prefix)
     return std::strncmp(str.c_str(), prefix.c_str(), prefix.size()) == 0;
 }
 
-std::vector<vec3f> generate_fibonacci_sphere(const float radius, const size_t n_points)
+std::vector<vec3f> generate_fibonacci_sphere(const size_t n_points, const float radius)
 {
     const float increment = M_PI * (3.f - std::sqrt(5.f));
     const float offset = 2.f / n_points;

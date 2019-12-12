@@ -5,6 +5,12 @@
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
 #include "json.hpp"
+#include "util.h"
+
+Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
+    : pos(pos), dir(dir), up(up)
+{
+}
 
 bool compute_divisor(int x, int &divisor)
 {
@@ -162,5 +168,28 @@ VolumeBrick load_volume_brick(const json &json, const int mpi_rank, const int mp
     brick.instance.commit();
 
     return brick;
+}
+
+std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
+                                 const box3f &world_bounds)
+{
+    std::vector<Camera> cameras;
+    for (size_t i = 0; i < camera_set.size(); ++i) {
+        const auto &c = camera_set[i];
+        if (c.find("orbit") != c.end()) {
+            const float orbit_radius = length(world_bounds.size()) * 0.75f;
+            std::cout << "orbit radius: " << orbit_radius
+                      << ", points: " << c["orbit"].get<int>() << "\n";
+            auto orbit_points = generate_fibonacci_sphere(c["orbit"].get<int>(), orbit_radius);
+            for (const auto &p : orbit_points) {
+                cameras.emplace_back(p + world_bounds.center(), normalize(-p), vec3f(0, 1, 0));
+            }
+        } else {
+            cameras.emplace_back(get_vec<float, 3>(c["pos"]),
+                                 get_vec<float, 3>(c["dir"]),
+                                 get_vec<float, 3>(c["up"]));
+        }
+    }
+    return cameras;
 }
 
