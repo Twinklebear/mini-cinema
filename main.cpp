@@ -86,16 +86,10 @@ void render_images(const std::vector<std::string> &args)
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
 
     world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["dimensions"]));
+    const vec2i img_size = get_vec<int, 2>(config["image_size"]);
 
-    vec3f cam_pos(world_bounds.center().x, world_bounds.center().y, -256);
-    vec3f cam_dir(0, 0, 1);
-    vec3f cam_up(0, 1, 0);
     cpp::Camera camera("perspective");
-    camera.setParam("aspect", 1.f);
-    camera.setParam("position", cam_pos);
-    camera.setParam("direction", cam_dir);
-    camera.setParam("up", cam_up);
-    camera.commit();
+    camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
 
     cpp::World world;
     world.setParam("instance", cpp::Data(brick.instance));
@@ -110,13 +104,26 @@ void render_images(const std::vector<std::string> &args)
     renderer.setParam("light", cpp::Data(ambient_light));
     renderer.commit();
 
-    cpp::FrameBuffer framebuffer(vec2i(1024, 1024), OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-    framebuffer.clear();
-    framebuffer.renderFrame(renderer, camera, world);
+    cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+    auto camera_set = config["camera"].get<std::vector<json>>();
+    for (size_t i = 0; i < camera_set.size(); ++i) {
+        const vec3f cam_pos = get_vec<float, 3>(camera_set[i]["pos"]);
+        const vec3f cam_dir = get_vec<float, 3>(camera_set[i]["dir"]);
+        const vec3f cam_up = get_vec<float, 3>(camera_set[i]["up"]);
+        camera.setParam("position", cam_pos);
+        camera.setParam("direction", cam_dir);
+        camera.setParam("up", cam_up);
+        camera.commit();
 
-    if (mpi_rank == 0) {
-        uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-        stbi_write_jpg("test.jpg", 1024, 1024, 4, fb, 90);
+        framebuffer.clear();
+        // TODO: render async
+        framebuffer.renderFrame(renderer, camera, world);
+
+        if (mpi_rank == 0) {
+            uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
+            const std::string fname = "mini-cinema_" + std::to_string(i) + ".jpg";
+            stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+        }
     }
 }
 
