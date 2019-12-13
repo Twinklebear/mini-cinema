@@ -27,6 +27,13 @@ int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
 
+const std::string USAGE =
+    "./mini_cinema <config.json> [options]\n"
+    "Options:\n"
+    "  -prefix <name>       Provide a prefix to prepend to the image file names.\n"
+    "  -fif <N>             Restrict the number of frames being rendered in parallel.\n"
+    "  -h                   Print this help.";
+
 struct AsyncRender {
     vec2i img_size;
     cpp::FrameBuffer fb = nullptr;
@@ -65,7 +72,6 @@ bool AsyncRender::finished() const
 void AsyncRender::save_image() const
 {
     uint32_t *img = (uint32_t *)fb.map(OSP_FB_COLOR);
-    std::cout << "saving " << output_file << "\n";
     stbi_write_jpg(output_file.c_str(), img_size.x, img_size.y, 4, img, 90);
     fb.unmap(img);
 }
@@ -114,15 +120,29 @@ int main(int argc, char **argv)
 void render_images(const std::vector<std::string> &args)
 {
     if (args.size() < 2) {
-        std::cout << "[error]: A config file to render is required\n";
+        std::cerr << "[error]: A config file to render is required\n";
+        std::cout << USAGE << "\n";
         return;
     }
 
     json config;
-    {
-        std::ifstream cfg_file(args[1].c_str());
-        cfg_file >> config;
+    int frames_in_flight = -1;
+    std::string prefix;
+    for (size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "-prefix") {
+            prefix = args[++i] + "-";
+        } else if (args[i] == "-fif") {
+            frames_in_flight = std::stof(args[++i]);
+            if (frames_in_flight <= 0) {
+                std::cerr << "[error]: Frames in flight must be >= 1\n";
+                return;
+            }
+        } else {
+            std::ifstream cfg_file(args[i].c_str());
+            cfg_file >> config;
+        }
     }
+
     if (mpi_rank == 0) {
         std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
     }
@@ -221,7 +241,7 @@ void render_images(const std::vector<std::string> &args)
                 camera.setParam("up", camera_set[i].up);
                 camera.commit();
 
-                std::string fname = "mini-cinema";
+                std::string fname = prefix + "mini-cinema";
                 if (!isosurfaces.empty()) {
                     fname += "-iso" + std::to_string(k);
                 }
@@ -229,6 +249,11 @@ void render_images(const std::vector<std::string> &args)
 
                 active_renders.emplace_back(renderer, camera, world, img_size, fname);
                 process_finished_renders(active_renders, tasks);
+
+                while (active_renders.size() >= frames_in_flight) {
+                    process_finished_renders(active_renders, tasks);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
             }
         }
     }

@@ -279,7 +279,10 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
             colors.emplace_back(
                 data[i * 4] / 255.f, data[i * 4 + 1] / 255.f, data[i * 4 + 2] / 255.f);
             // If no alpha in the image, generate a linear ramp
-            if (n == 3) {
+            // TODO: Can we actually have different opacities? Who owns the space-skipping
+            // structure in VKL? the volume or the volumetric model? If we swap it out
+            // on renders in flight the space skipping will be messed up
+            if (true) {//n == 3) {
                 opacities.emplace_back(static_cast<float>(i) / x);
             } else {
                 opacities.emplace_back(data[i * 4 + 3] / 255.f);
