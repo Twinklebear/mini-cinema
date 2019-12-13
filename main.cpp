@@ -143,23 +143,21 @@ void render_images(const std::vector<std::string> &args)
         } else {
             std::ifstream cfg_file(args[i].c_str());
             cfg_file >> config;
+
+            // Prefix the volume file name with the path to the config file
+            const std::string base_path = get_file_basepath(args[i]);
+            if (base_path != args[i]) {
+                config["volume"] = base_path + "/" + config["volume"].get<std::string>();
+                for (size_t j = 0; j < config["colormap"].size(); ++j) {
+                    config["colormap"][j] =
+                        base_path + "/" + config["colormap"][j].get<std::string>();
+                }
+            }
         }
     }
 
     if (mpi_rank == 0) {
         std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
-    }
-
-    // Prefix the volume file name with the path to the config file
-    {
-        const std::string base_path = get_file_basepath(args[1]);
-        if (base_path != args[1]) {
-            config["volume"] = base_path + "/" + config["volume"].get<std::string>();
-            for (size_t i = 0; i < config["colormap"].size(); ++i) {
-                config["colormap"][i] =
-                    base_path + "/" + config["colormap"][i].get<std::string>();
-            }
-        }
     }
 
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
