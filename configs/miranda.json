@@ -1,0 +1,22 @@
+{
+    "volume": "miranda_1024x1024x1024_float32.raw",
+    "dimensions": [1024, 1024, 1024],
+    "data_type": "float32",
+    "grid_spacing": [1, 1, 1],
+    "image_size": [512, 512],
+    "value_range": [1, 3],
+    "camera": [
+        {
+            "orbit": 5
+        }
+    ],
+    "colormap": [
+            "ice_fire.png",
+            "linear_green_transparent.png",
+            "ext_cool_warm.png"
+    ],
+    "isovalue": [1.5],
+    "isosurface_color": [0.2, 0.5, 1.0],
+    "background_color": [0, 0, 0]
+}
+
