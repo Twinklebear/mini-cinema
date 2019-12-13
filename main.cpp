@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdio>
 #include <iostream>
 #include <mpi.h>
@@ -15,6 +16,7 @@
 using namespace ospray;
 using namespace ospcommon;
 using namespace ospcommon::math;
+using namespace std::chrono;
 using json = nlohmann::json;
 
 int mpi_rank = 0;
@@ -89,6 +91,8 @@ void render_images(const std::vector<std::string> &args)
         }
     }
 
+    VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
+
     world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["dimensions"]));
     const vec2f value_range = get_vec<float, 2>(config["value_range"]);
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
@@ -97,17 +101,15 @@ void render_images(const std::vector<std::string> &args)
     const auto camera_set =
         load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
 
-    cpp::Camera camera("perspective");
-    camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
-
-    VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
-
     // We don't use the implicit isosurfaces geometry because I want to test
     // on non-volume objects, e.g. explicit triangle surfaces
     std::vector<cpp::Geometry> isosurfaces;
     if (config.find("isovalue") != config.end()) {
-        isosurfaces = extract_isosurfaces(config, brick);
+        isosurfaces = extract_isosurfaces(config, brick, mpi_rank);
     }
+
+    cpp::Camera camera("perspective");
+    camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
 
     cpp::VolumetricModel model(brick.brick);
     model.setParam("transferFunction", colormaps[0]);
@@ -145,6 +147,11 @@ void render_images(const std::vector<std::string> &args)
 
     cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
 
+    auto start = high_resolution_clock::now();
+    if (mpi_rank == 0) {
+        std::cout << "Beginning rendering\n";
+    }
+
     for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
         if (!isosurfaces.empty()) {
             cpp::GeometricModel geom_model(isosurfaces[k]);
@@ -178,15 +185,20 @@ void render_images(const std::vector<std::string> &args)
 
                 if (mpi_rank == 0) {
                     uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-                    std::string fname = "mini-cinema-";
+                    std::string fname = "mini-cinema";
                     if (!isosurfaces.empty()) {
-                        fname += "iso" + std::to_string(k);
+                        fname += "-iso" + std::to_string(k);
                     }
                     fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + ".jpg";
                     stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
                 }
             }
         }
+    }
+    auto end = high_resolution_clock::now();
+    if (mpi_rank == 0) {
+        std::cout << "All renders completed in "
+                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
     }
 }
 

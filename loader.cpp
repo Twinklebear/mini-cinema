@@ -1,4 +1,5 @@
 #include "loader.h"
+#include <chrono>
 #include <cstdio>
 #include <iostream>
 #include <mpi.h>
@@ -66,8 +67,9 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
     return faces;
 }
 
-VolumeBrick load_volume_brick(const json &config, const int mpi_rank, const int mpi_size)
+VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_size)
 {
+    using namespace std::chrono;
     VolumeBrick brick;
 
     const std::string volume_file = config["volume"].get<std::string>();
@@ -107,49 +109,127 @@ VolumeBrick load_volume_brick(const json &config, const int mpi_rank, const int 
     brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
 
     // Load the sub-bricks using MPI I/O
-    {
-        size_t voxel_size = 0;
-        MPI_Datatype voxel_type;
-        const std::string voxel_type_string = config["data_type"].get<std::string>();
-        if (voxel_type_string == "uint8") {
-            voxel_type = MPI_UNSIGNED_CHAR;
-            voxel_size = 1;
-        } else if (voxel_type_string == "uint16") {
-            voxel_type = MPI_UNSIGNED_SHORT;
-            voxel_size = 2;
-        } else if (voxel_type_string == "float32") {
-            voxel_type = MPI_FLOAT;
-            voxel_size = 4;
-        } else if (voxel_type_string == "float64") {
-            voxel_type = MPI_DOUBLE;
-            voxel_size = 8;
-        } else {
-            throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
+    size_t voxel_size = 0;
+    MPI_Datatype voxel_type;
+    const std::string voxel_type_string = config["data_type"].get<std::string>();
+    if (voxel_type_string == "uint8") {
+        voxel_type = MPI_UNSIGNED_CHAR;
+        voxel_size = 1;
+    } else if (voxel_type_string == "uint16") {
+        voxel_type = MPI_UNSIGNED_SHORT;
+        voxel_size = 2;
+    } else if (voxel_type_string == "float32") {
+        voxel_type = MPI_FLOAT;
+        voxel_size = 4;
+    } else if (voxel_type_string == "float64") {
+        voxel_type = MPI_DOUBLE;
+        voxel_size = 8;
+    } else {
+        throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
+    }
+
+    const size_t n_voxels =
+        size_t(brick.full_dims.x) * size_t(brick.full_dims.y) * size_t(brick.full_dims.z);
+    brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
+
+    auto start = high_resolution_clock::now();
+
+    MPI_Datatype brick_type;
+    MPI_Type_create_subarray(3,
+                             &volume_dims.x,
+                             &brick.full_dims.x,
+                             &brick_read_offset.x,
+                             MPI_ORDER_FORTRAN,
+                             voxel_type,
+                             &brick_type);
+    MPI_Type_commit(&brick_type);
+
+    MPI_File file_handle;
+    auto rc = MPI_File_open(
+        MPI_COMM_WORLD, volume_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
+    if (rc != MPI_SUCCESS) {
+        std::cerr << "[error]: Failed to open file " << volume_file << "\n";
+        throw std::runtime_error("Failed to open " + volume_file);
+    }
+    MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
+    rc = MPI_File_read_all(
+        file_handle, brick.voxel_data->data(), n_voxels, voxel_type, MPI_STATUS_IGNORE);
+    if (rc != MPI_SUCCESS) {
+        std::cerr << "[error]: Failed to read all voxels from file\n";
+        throw std::runtime_error("Failed to read all voxels from file");
+    }
+    MPI_File_close(&file_handle);
+    MPI_Type_free(&brick_type);
+
+    auto end = high_resolution_clock::now();
+    if (mpi_rank == 0) {
+        std::cout << "Loading volume brick took "
+                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
+    }
+
+    cpp::Data osp_data;
+    switch (voxel_type) {
+    case MPI_UNSIGNED_CHAR:
+        osp_data = cpp::Data(*brick.voxel_data, true);
+        break;
+    case MPI_UNSIGNED_SHORT:
+        osp_data =
+            cpp::Data(n_voxels, reinterpret_cast<uint16_t *>(brick.voxel_data->data()), true);
+        break;
+    case MPI_FLOAT:
+        osp_data =
+            cpp::Data(n_voxels, reinterpret_cast<float *>(brick.voxel_data->data()), true);
+        break;
+    case MPI_DOUBLE:
+        osp_data =
+            cpp::Data(n_voxels, reinterpret_cast<double *>(brick.voxel_data->data()), true);
+        break;
+    default:
+        std::cerr << "[error]: Unsupported voxel type\n";
+        throw std::runtime_error("[error]: Unsupported voxel type");
+    }
+    brick.brick.setParam("voxelData", osp_data);
+
+    // If the value range wasn't provided, compute it
+    if (config.find("value_range") == config.end()) {
+        start = high_resolution_clock::now();
+
+        vec2f value_range;
+        switch (voxel_type) {
+        case MPI_UNSIGNED_CHAR:
+            value_range = compute_value_range(brick.voxel_data->data(), n_voxels);
+            break;
+        case MPI_UNSIGNED_SHORT:
+            value_range = compute_value_range(
+                reinterpret_cast<uint16_t *>(brick.voxel_data->data()), n_voxels);
+            break;
+        case MPI_FLOAT:
+            value_range = compute_value_range(
+                reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
+            break;
+        case MPI_DOUBLE:
+            value_range = compute_value_range(
+                reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
+            break;
+        default:
+            std::cerr << "[error]: Unsupported voxel type\n";
+            throw std::runtime_error("[error]: Unsupported voxel type");
         }
 
-        const size_t n_voxels =
-            size_t(brick.full_dims.x) * size_t(brick.full_dims.y) * size_t(brick.full_dims.z);
-        brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
-        MPI_Datatype brick_type;
-        MPI_Type_create_subarray(3,
-                                 &volume_dims.x,
-                                 &brick.full_dims.x,
-                                 &brick_read_offset.x,
-                                 MPI_ORDER_FORTRAN,
-                                 voxel_type,
-                                 &brick_type);
-        MPI_Type_commit(&brick_type);
+        vec2f global_value_range;
+        MPI_Allreduce(
+            &value_range.x, &global_value_range.x, 1, MPI_FLOAT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(
+            &value_range.y, &global_value_range.y, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
 
-        MPI_File file_handle;
-        MPI_File_open(
-            MPI_COMM_WORLD, volume_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
-        MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
-        MPI_File_read_all(
-            file_handle, brick.voxel_data->data(), n_voxels, voxel_type, MPI_STATUS_IGNORE);
-        MPI_File_close(&file_handle);
-        MPI_Type_free(&brick_type);
+        end = high_resolution_clock::now();
 
-        brick.brick.setParam("voxelData", cpp::Data(*brick.voxel_data, true));
+        if (mpi_rank == 0) {
+            std::cout << "Computed value range: " << global_value_range << "\n"
+                      << "Value range computation took "
+                      << duration_cast<milliseconds>(end - start).count() << "ms\n";
+        }
+        config["value_range"] = {global_value_range.x, global_value_range.y};
     }
 
     // Set the clipping box of the volume to clip off the ghost voxels
@@ -216,8 +296,12 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
     return colormaps;
 }
 
-std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeBrick &brick)
+std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
+                                               const VolumeBrick &brick,
+                                               const int mpi_rank)
 {
+    using namespace std::chrono;
+
     std::vector<cpp::Geometry> isosurfaces;
 #ifdef VTK_FOUND
     const std::string voxel_type_string = config["data_type"].get<std::string>();
@@ -258,9 +342,7 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeB
 
     auto isovals = config["isovalue"].get<std::vector<float>>();
     for (const auto &val : isovals) {
-        std::vector<vec3f> vertices;
-        std::vector<vec3ui> indices;
-
+        auto start = high_resolution_clock::now();
         vtkSmartPointer<vtkFlyingEdges3D> fedges = vtkSmartPointer<vtkFlyingEdges3D>::New();
         fedges->SetInputData(img_data);
         fedges->SetNumberOfContours(1);
@@ -269,9 +351,10 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeB
         fedges->Update();
         vtkPolyData *isosurf = fedges->GetOutput();
 
+        std::vector<vec3f> vertices;
+        std::vector<vec3ui> indices;
         vertices.reserve(isosurf->GetNumberOfCells());
         indices.reserve(isosurf->GetNumberOfCells());
-
         for (size_t i = 0; i < isosurf->GetNumberOfCells(); ++i) {
             vtkTriangle *tri = dynamic_cast<vtkTriangle *>(isosurf->GetCell(i));
             if (tri->ComputeArea() == 0.0) {
@@ -286,12 +369,20 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config, const VolumeB
             }
             indices.push_back(tids);
         }
+        auto end = high_resolution_clock::now();
+
+        std::cout << "(rank " << mpi_rank << "): Isosurface at " << val << " has "
+                  << indices.size() << " triangles, extracted in "
+                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
+        if (indices.empty()) {
+            continue;
+        }
+
         cpp::Geometry mesh("mesh");
         mesh.setParam("vertex.position", cpp::Data(vertices));
         mesh.setParam("index", cpp::Data(indices));
         mesh.commit();
         isosurfaces.push_back(mesh);
-        std::cout << "Isosurface at " << val << " has " << indices.size() << " triangles\n";
     }
 #else
     std::cerr << "[warning]: Scene requested isosurface geometry, but app was not compiled "
