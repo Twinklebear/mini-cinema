@@ -137,6 +137,9 @@ void render_images(const std::vector<std::string> &args)
                 std::cerr << "[error]: Frames in flight must be >= 1\n";
                 return;
             }
+        } else if (args[i] == "-h") {
+            std::cout << USAGE << "\n";
+            return;
         } else {
             std::ifstream cfg_file(args[i].c_str());
             cfg_file >> config;
