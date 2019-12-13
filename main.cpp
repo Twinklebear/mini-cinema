@@ -1,9 +1,13 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iostream>
+#include <thread>
 #include <mpi.h>
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
+#include <tbb/task_group.h>
+#include <tbb/tbb.h>
 #include "json.hpp"
 #include "loader.h"
 #include "util.h"
@@ -23,7 +27,51 @@ int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
 
+struct AsyncRender {
+    vec2i img_size;
+    cpp::FrameBuffer fb = nullptr;
+    cpp::Future future = nullptr;
+    std::string output_file;
+
+    AsyncRender() = default;
+    AsyncRender(cpp::Renderer renderer,
+                cpp::Camera camera,
+                cpp::World world,
+                vec2i img_size,
+                std::string output_file);
+
+    bool finished() const;
+
+    void save_image() const;
+};
+
+AsyncRender::AsyncRender(cpp::Renderer renderer,
+                         cpp::Camera camera,
+                         cpp::World world,
+                         vec2i img,
+                         std::string output_file)
+    : img_size(img),
+      fb(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM),
+      future(fb.renderFrame(renderer, camera, world)),
+      output_file(output_file)
+{
+}
+
+bool AsyncRender::finished() const
+{
+    return ospIsReady(future.handle(), OSP_TASK_FINISHED);
+}
+
+void AsyncRender::save_image() const
+{
+    uint32_t *img = (uint32_t *)fb.map(OSP_FB_COLOR);
+    std::cout << "saving " << output_file << "\n";
+    stbi_write_jpg(output_file.c_str(), img_size.x, img_size.y, 4, img, 90);
+    fb.unmap(img);
+}
+
 void render_images(const std::vector<std::string> &args);
+void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks);
 
 int main(int argc, char **argv)
 {
@@ -108,17 +156,6 @@ void render_images(const std::vector<std::string> &args)
         isosurfaces = extract_isosurfaces(config, brick, mpi_rank);
     }
 
-    cpp::Camera camera("perspective");
-    camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
-
-    cpp::VolumetricModel model(brick.brick);
-    model.setParam("transferFunction", colormaps[0]);
-    model.setParam("samplingRate", 1.f);
-    model.commit();
-
-    cpp::Group group;
-    group.setParam("volume", cpp::Data(model));
-
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
         material.setParam("Kd", get_vec<float, 3>(config["isosurface_color"]));
@@ -126,11 +163,6 @@ void render_images(const std::vector<std::string> &args)
         material.setParam("Kd", vec3f(1.f));
     }
     material.commit();
-
-    group.commit();
-
-    cpp::Instance instance(group);
-    instance.commit();
 
     // create and setup an ambient light
     cpp::Light ambient_light("ambient");
@@ -145,60 +177,90 @@ void render_images(const std::vector<std::string> &args)
     }
     renderer.commit();
 
-    cpp::FrameBuffer framebuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
-
     auto start = high_resolution_clock::now();
     if (mpi_rank == 0) {
         std::cout << "Beginning rendering\n";
     }
 
+    tbb::task_group tasks;
+    std::vector<AsyncRender> active_renders;
     for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
+        cpp::GeometricModel geom_model;
         if (!isosurfaces.empty()) {
-            cpp::GeometricModel geom_model(isosurfaces[k]);
+            geom_model = cpp::GeometricModel(isosurfaces[k]);
             geom_model.setParam("material", material);
             geom_model.commit();
-            group.setParam("geometry", cpp::Data(geom_model));
-            group.commit();
-
-            instance = cpp::Instance(group);
-            instance.commit();
         }
 
-        cpp::World world;
-        world.setParam("instance", cpp::Data(instance));
-        world.setParam("regions", cpp::Data(brick.bounds));
-        world.commit();
-
         for (size_t j = 0; j < colormaps.size(); ++j) {
+            cpp::VolumetricModel model(brick.brick);
             model.setParam("transferFunction", colormaps[j]);
+            model.setParam("samplingRate", 1.f);
             model.commit();
 
+            cpp::Group group;
+            group.setParam("volume", cpp::Data(model));
+            if (geom_model) {
+                group.setParam("geometry", cpp::Data(geom_model));
+            }
+            group.commit();
+
+            cpp::Instance instance(group);
+            instance.commit();
+
+            cpp::World world;
+            world.setParam("instance", cpp::Data(instance));
+            world.setParam("regions", cpp::Data(brick.bounds));
+            world.commit();
+
             for (size_t i = 0; i < camera_set.size(); ++i) {
+                cpp::Camera camera("perspective");
+                camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
                 camera.setParam("position", camera_set[i].pos);
                 camera.setParam("direction", camera_set[i].dir);
                 camera.setParam("up", camera_set[i].up);
                 camera.commit();
 
-                framebuffer.clear();
-                // TODO: render async
-                framebuffer.renderFrame(renderer, camera, world);
-
-                if (mpi_rank == 0) {
-                    uint32_t *fb = (uint32_t *)framebuffer.map(OSP_FB_COLOR);
-                    std::string fname = "mini-cinema";
-                    if (!isosurfaces.empty()) {
-                        fname += "-iso" + std::to_string(k);
-                    }
-                    fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + ".jpg";
-                    stbi_write_jpg(fname.c_str(), img_size.x, img_size.y, 4, fb, 90);
+                std::string fname = "mini-cinema";
+                if (!isosurfaces.empty()) {
+                    fname += "-iso" + std::to_string(k);
                 }
+                fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + ".jpg";
+
+                active_renders.emplace_back(renderer, camera, world, img_size, fname);
+                process_finished_renders(active_renders, tasks);
             }
         }
+    }
+    while (!active_renders.empty()) {
+        process_finished_renders(active_renders, tasks);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     auto end = high_resolution_clock::now();
     if (mpi_rank == 0) {
         std::cout << "All renders completed in "
                   << duration_cast<milliseconds>(end - start).count() << "ms\n";
     }
+    // Wait for image writes to complete
+    tasks.wait();
+    end = high_resolution_clock::now();
+    if (mpi_rank == 0) {
+        std::cout << "Full run (renders + saving images) completed in "
+                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
+    }
 }
 
+void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks)
+{
+    auto done = std::stable_partition(
+        renders.begin(), renders.end(), [](const AsyncRender &a) { return !a.finished(); });
+
+    for (auto it = done; it != renders.end(); ++it) {
+        AsyncRender r = *it;
+        if (mpi_rank == 0) {
+            tasks.run([r]() { r.save_image(); });
+        }
+    }
+
+    renders.erase(done, renders.end());
+}
