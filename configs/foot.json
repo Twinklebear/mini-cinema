@@ -12,17 +12,15 @@
             "up": [0, 1, 0]
         },
         {
-            "pos": [-256, 128, 128],
-            "dir": [1, 0, 0],
-            "up": [0, 1, 0]
+            "orbit": 2
         }
     ],
     "colormap": [
-            "ice_fire.png",
-            "ext_cool_warm.png"
+        "ice_fire.png",
+        "ext_cool_warm.png",
+        "linear_green_transparent.png"
     ],
-    "_isovalue": [128, 200],
+    "isovalue": [128, 200, 150],
     "isosurface_color": [0.2, 0.5, 1.0],
     "background_color": [0, 0, 0]
 }
-
