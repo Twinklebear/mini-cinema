@@ -196,6 +196,9 @@ void render_images(const std::vector<std::string> &args)
     if (config.find("background_color") != config.end()) {
         renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
     }
+    if (config.find("spp") != config.end()) {
+        renderer.setParam("spp", config["spp"].get<int>());
+    }
     renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
 
@@ -203,6 +206,10 @@ void render_images(const std::vector<std::string> &args)
     if (mpi_rank == 0) {
         std::cout << "Beginning rendering\n";
     }
+
+    const std::string fmt_string =
+        "%0" + std::to_string(static_cast<int>(std::log10(camera_set.size())) + 1) + "d";
+    std::string fmt_out_buf(static_cast<int>(std::log10(camera_set.size())) + 1, '0');
 
     tbb::task_group tasks;
     std::vector<AsyncRender> active_renders;
@@ -246,7 +253,8 @@ void render_images(const std::vector<std::string> &args)
                 if (!isosurfaces.empty()) {
                     fname += "-iso" + std::to_string(k);
                 }
-                fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + ".jpg";
+                std::sprintf(&fmt_out_buf[0], fmt_string.c_str(), static_cast<int>(i));
+                fname += "-tfn" + std::to_string(j) + "-cam" + fmt_out_buf + ".jpg";
 
                 active_renders.emplace_back(renderer, camera, world, img_size, fname);
                 process_finished_renders(active_renders, tasks);

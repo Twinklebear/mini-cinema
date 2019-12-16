@@ -5,6 +5,7 @@
     "data_type": "uint8",
     "grid_spacing": [1, 1, 1],
     "image_size": [512, 512],
+    "spp": 2,
     "camera": [
         {
             "pos": [128, 128, -256],
