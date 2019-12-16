@@ -196,6 +196,7 @@ void render_images(const std::vector<std::string> &args)
     if (config.find("background_color") != config.end()) {
         renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
     }
+    renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
 
     auto start = high_resolution_clock::now();
@@ -216,7 +217,6 @@ void render_images(const std::vector<std::string> &args)
         for (size_t j = 0; j < colormaps.size(); ++j) {
             cpp::VolumetricModel model(brick.brick);
             model.setParam("transferFunction", colormaps[j]);
-            model.setParam("samplingRate", 1.f);
             model.commit();
 
             cpp::Group group;
