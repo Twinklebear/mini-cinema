@@ -168,23 +168,18 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     }
 
     cpp::Data osp_data;
-    switch (voxel_type) {
-    case MPI_UNSIGNED_CHAR:
+    if (voxel_type == MPI_UNSIGNED_CHAR) {
         osp_data = cpp::Data(*brick.voxel_data, true);
-        break;
-    case MPI_UNSIGNED_SHORT:
+    } else if (voxel_type == MPI_UNSIGNED_SHORT) {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<uint16_t *>(brick.voxel_data->data()), true);
-        break;
-    case MPI_FLOAT:
+    } else if (voxel_type == MPI_FLOAT) {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<float *>(brick.voxel_data->data()), true);
-        break;
-    case MPI_DOUBLE:
+    } else if (voxel_type == MPI_DOUBLE) {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<double *>(brick.voxel_data->data()), true);
-        break;
-    default:
+    } else {
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
     }
@@ -195,23 +190,18 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         start = high_resolution_clock::now();
 
         vec2f value_range;
-        switch (voxel_type) {
-        case MPI_UNSIGNED_CHAR:
+        if (voxel_type == MPI_UNSIGNED_CHAR) {
             value_range = compute_value_range(brick.voxel_data->data(), n_voxels);
-            break;
-        case MPI_UNSIGNED_SHORT:
+        } else if (voxel_type == MPI_UNSIGNED_SHORT) {
             value_range = compute_value_range(
                 reinterpret_cast<uint16_t *>(brick.voxel_data->data()), n_voxels);
-            break;
-        case MPI_FLOAT:
+        } else if (voxel_type == MPI_FLOAT) {
             value_range = compute_value_range(
                 reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
-            break;
-        case MPI_DOUBLE:
+        } else if (voxel_type == MPI_DOUBLE) {
             value_range = compute_value_range(
                 reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
-            break;
-        default:
+        } else {
             std::cerr << "[error]: Unsupported voxel type\n";
             throw std::runtime_error("[error]: Unsupported voxel type");
         }
@@ -282,7 +272,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
             // TODO: Can we actually have different opacities? Who owns the space-skipping
             // structure in VKL? the volume or the volumetric model? If we swap it out
             // on renders in flight the space skipping will be messed up
-            if (true) {//n == 3) {
+            if (true) {  // n == 3) {
                 opacities.emplace_back(static_cast<float>(i) / x);
             } else {
                 opacities.emplace_back(data[i * 4 + 3] / 255.f);
