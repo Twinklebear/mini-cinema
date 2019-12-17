@@ -234,6 +234,10 @@ void render_images(const std::vector<std::string> &args)
             group.commit();
 
             cpp::Instance instance(group);
+            // We apply a translation to the instance to place it correctly in
+            // the distributed world
+            auto transform = affine3f::translate(brick.ghost_bounds.lower);
+            instance.setParam("xfm", transform);
             instance.commit();
 
             cpp::World world;

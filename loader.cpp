@@ -105,7 +105,6 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     brick.brick = cpp::Volume("structured_regular");
     brick.brick.setParam("dimensions", brick.full_dims);
-    brick.brick.setParam("gridOrigin", brick.ghost_bounds.lower);
     brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
 
     // Load the sub-bricks using MPI I/O
@@ -326,8 +325,6 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
     img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
-    img_data->SetOrigin(
-        brick.ghost_bounds.lower.x, brick.ghost_bounds.lower.y, brick.ghost_bounds.lower.z);
     img_data->GetPointData()->SetScalars(data_array);
 
     auto isovals = config["isovalue"].get<std::vector<float>>();
