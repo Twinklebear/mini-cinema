@@ -182,7 +182,7 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
     }
-    brick.brick.setParam("voxelData", osp_data);
+    brick.brick.setParam("data", osp_data);
 
     // If the value range wasn't provided, compute it
     if (config.find("value_range") == config.end()) {
