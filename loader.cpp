@@ -90,6 +90,7 @@ VolumeBrick load_volume_brick(json &config,
                          vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
 
     brick.full_dims = brick.dims;
+    // TODO: This is assuming the sim isn't giving us ghost zone data
     brick.ghost_bounds = brick.bounds;
 
     brick.brick = cpp::Volume("structured_regular");
