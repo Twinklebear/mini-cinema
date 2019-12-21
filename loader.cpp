@@ -88,29 +88,28 @@ VolumeBrick load_volume_brick(json &config,
     brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
     brick.bounds = box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
                          vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
-
     brick.full_dims = brick.dims;
     // TODO: This is assuming the sim isn't giving us ghost zone data
     brick.ghost_bounds = brick.bounds;
 
     brick.brick = cpp::Volume("structured_regular");
     brick.brick.setParam("dimensions", brick.full_dims);
-    brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
+    brick.brick.setParam("gridSpacing", spacing);
 
     const size_t n_voxels = brick.dims.long_product();
     cpp::Data osp_data;
     if (field.dataType == UINT8) {
         osp_data =
             cpp::Data(n_voxels, static_cast<const uint8_t *>(brick.voxel_data->data()), true);
-        config["data_type"] = "uint8";
+        config["type"] = "uint8";
     } else if (field.dataType == FLOAT) {
         osp_data =
             cpp::Data(n_voxels, static_cast<const float *>(brick.voxel_data->data()), true);
-        config["data_type"] = "float";
+        config["type"] = "float32";
     } else if (field.dataType == DOUBLE) {
         osp_data =
             cpp::Data(n_voxels, static_cast<const double *>(brick.voxel_data->data()), true);
-        config["data_type"] = "double";
+        config["type"] = "float64";
     } else {
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
@@ -220,7 +219,7 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
 
     std::vector<cpp::Geometry> isosurfaces;
 #ifdef VTK_FOUND
-    const std::string voxel_type_string = config["data_type"].get<std::string>();
+    const std::string voxel_type_string = config["type"].get<std::string>();
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
         auto arr = vtkSmartPointer<vtkUnsignedCharArray>::New();
@@ -229,14 +228,14 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
             brick.voxel_data->size(),
             1);
         data_array = arr;
-    } else if (voxel_type_string == "float") {
+    } else if (voxel_type_string == "float32") {
         auto arr = vtkSmartPointer<vtkFloatArray>::New();
         arr->SetArray(
             const_cast<float *>(static_cast<const float *>(brick.voxel_data->data())),
             brick.voxel_data->size(),
             1);
         data_array = arr;
-    } else if (voxel_type_string == "double") {
+    } else if (voxel_type_string == "float64") {
         auto arr = vtkSmartPointer<vtkDoubleArray>::New();
         arr->SetArray(
             const_cast<double *>(static_cast<const double *>(brick.voxel_data->data())),

@@ -1,9 +1,9 @@
 {
     "volume": "foot_256x256x256_uint8.raw",
     "value_range": [0, 255],
-    "dimensions": [256, 256, 256],
-    "data_type": "uint8",
-    "grid_spacing": [1, 1, 1],
+    "size": [256, 256, 256],
+    "type": "uint8",
+    "spacing": [1, 1, 1],
     "image_size": [512, 512],
     "spp": 2,
     "camera": [
