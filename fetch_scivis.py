@@ -29,7 +29,7 @@ meta["camera"] = [
         {
             "orbit": 1
         }]
-meta["colormap"] = [os.path.normpath(config_path + "/configs/cool-warm-paraview.png")]
+meta["colormap"] = [os.path.normpath(config_path + "/configs/paraview_cool_warm.png")]
 meta["isosurface_color"] = [0.2, 0.5, 1.0]
 meta["background_color"] = [0, 0, 0]
 meta["image_size"] = [512, 512]
