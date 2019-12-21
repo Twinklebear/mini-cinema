@@ -88,10 +88,11 @@ VolumeBrick load_volume_brick(json &config,
     brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
     brick.bounds = box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
                          vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
-    const vec3f spacing = get_vec<int, 3>(config["spacing"]);
     brick.full_dims = brick.dims;
     // TODO: This is assuming the sim isn't giving us ghost zone data
     brick.ghost_bounds = brick.bounds;
+    const vec3f spacing = brick.bounds.size() / vec3f(brick.dims);
+    config["spacing"] = {spacing.x, spacing.y, spacing.z};
 
     brick.brick = cpp::Volume("structured_regular");
     brick.brick.setParam("dimensions", brick.full_dims);
@@ -237,8 +238,10 @@ std::vector<Isosurface> extract_isosurfaces(const json &config,
         throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
     }
 
+    const vec3f spacing = get_vec<float, 3>(config["spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
+    img_data->SetSpacing(spacing.x, spacing.y, spacing.z);
     img_data->GetPointData()->SetScalars(data_array);
 
     // For simulations isovalues may be best treated as [0, 1] picking a t value along
