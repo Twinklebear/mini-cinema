@@ -119,31 +119,21 @@ VolumeBrick load_volume_brick(json &config,
 
     // If the value range wasn't provided, compute it
     if (config.find("value_range") == config.end()) {
-        vec2f value_range;
         if (field.dataType == UINT8) {
-            value_range = compute_value_range(
+            brick.value_range = compute_value_range(
                 reinterpret_cast<uint8_t *>(brick.voxel_data->data()), n_voxels);
         } else if (field.dataType == FLOAT) {
-            value_range = compute_value_range(
+            brick.value_range = compute_value_range(
                 reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
         } else if (field.dataType == DOUBLE) {
-            value_range = compute_value_range(
+            brick.value_range = compute_value_range(
                 reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
         } else {
             std::cerr << "[error]: Unsupported voxel type\n";
             throw std::runtime_error("[error]: Unsupported voxel type");
         }
-
-        vec2f global_value_range;
-        MPI_Allreduce(
-            &value_range.x, &global_value_range.x, 1, MPI_FLOAT, MPI_MIN, MPI_COMM_WORLD);
-        MPI_Allreduce(
-            &value_range.y, &global_value_range.y, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
-
-        if (mpi_rank == 0) {
-            std::cout << "Computed value range: " << global_value_range << "\n";
-        }
-        config["value_range"] = {global_value_range.x, global_value_range.y};
+    } else {
+        brick.value_range = get_vec<float, 2>(config["value_range"]);
     }
 
     // Set the clipping box of the volume to clip off the ghost voxels
@@ -211,14 +201,14 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
     return colormaps;
 }
 
-std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
-                                               const VolumeBrick &brick,
-                                               const int mpi_rank,
-                                               const vec2f &value_range)
+std::vector<Isosurface> extract_isosurfaces(const json &config,
+                                            const VolumeBrick &brick,
+                                            const int mpi_rank,
+                                            const vec2f &value_range)
 {
     using namespace std::chrono;
 
-    std::vector<cpp::Geometry> isosurfaces;
+    std::vector<Isosurface> isosurfaces;
 #ifdef VTK_FOUND
     const std::string voxel_type_string = config["type"].get<std::string>();
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
@@ -289,15 +279,17 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
         std::cout << "(rank " << mpi_rank << "): Isosurface at " << val << " has "
                   << indices.size() << " triangles, extracted in "
                   << duration_cast<milliseconds>(end - start).count() << "ms\n";
-        if (indices.empty()) {
-            continue;
-        }
 
-        cpp::Geometry mesh("mesh");
-        mesh.setParam("vertex.position", cpp::Data(vertices));
-        mesh.setParam("index", cpp::Data(indices));
-        mesh.commit();
-        isosurfaces.push_back(mesh);
+        Isosurface surf;
+        surf.n_triangles = indices.size();
+        if (!indices.empty()) {
+            cpp::Geometry mesh("mesh");
+            mesh.setParam("vertex.position", cpp::Data(vertices));
+            mesh.setParam("index", cpp::Data(indices));
+            mesh.commit();
+            surf.geometry = mesh;
+        }
+        isosurfaces.push_back(surf);
     }
 #else
     std::cerr << "[warning]: Scene requested isosurface geometry, but app was not compiled "

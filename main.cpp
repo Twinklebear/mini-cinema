@@ -204,7 +204,7 @@ void render_images(const std::vector<std::string> &args)
     if (config.find("spp") != config.end()) {
         renderer.setParam("spp", config["spp"].get<int>());
     }
-    renderer.setParam("volumeSamplingRate", 2.f);
+    renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
 
     const std::string fmt_string =
@@ -216,6 +216,7 @@ void render_images(const std::vector<std::string> &args)
         }
         // Query the data from the simulation
         auto regions = is::client::query();
+        std::cout << "Rank " << mpi_rank << " received " << regions.size() << "regions\n";
 
         auto start = high_resolution_clock::now();
         if (mpi_rank == 0) {
@@ -224,10 +225,41 @@ void render_images(const std::vector<std::string> &args)
 
         // TODO: support for multiple regions, we'll need to pass the regions param to
         // the world.
-        VolumeBrick brick = load_volume_brick(config, regions[0], mpi_rank, mpi_size);
+        std::vector<VolumeBrick> bricks;
+        for (auto &region : regions) {
+            bricks.push_back(load_volume_brick(config, region, mpi_rank, mpi_size));
+        }
         world_bounds = box3f(
             vec3f(regions[0].world.min.x, regions[0].world.min.y, regions[0].world.min.z),
             vec3f(regions[0].world.max.x, regions[0].world.max.y, regions[0].world.max.z));
+
+        if (config.find("value_range") == config.end()) {
+            vec2f local_value_range = bricks[0].value_range;
+            for (size_t i = 1; i < bricks.size(); ++i) {
+                local_value_range.x = std::min(bricks[i].value_range.x, local_value_range.x);
+                local_value_range.y = std::max(bricks[i].value_range.y, local_value_range.y);
+            }
+
+            vec2f global_value_range;
+            MPI_Allreduce(&local_value_range.x,
+                          &global_value_range.x,
+                          1,
+                          MPI_FLOAT,
+                          MPI_MIN,
+                          MPI_COMM_WORLD);
+            MPI_Allreduce(&local_value_range.y,
+                          &global_value_range.y,
+                          1,
+                          MPI_FLOAT,
+                          MPI_MAX,
+                          MPI_COMM_WORLD);
+
+            if (mpi_rank == 0) {
+                std::cout << "Computed value range: " << global_value_range << "\n";
+            }
+            config["value_range"] = {global_value_range.x, global_value_range.y};
+        }
+
         const vec2f value_range = get_vec<float, 2>(config["value_range"]);
         const auto colormaps =
             load_colormaps(config["colormap"].get<std::vector<std::string>>(), value_range);
@@ -235,43 +267,51 @@ void render_images(const std::vector<std::string> &args)
             load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
         // We don't use the implicit isosurfaces geometry because I want to test
         // on non-volume objects, e.g. explicit triangle surfaces
-        std::vector<cpp::Geometry> isosurfaces;
+        std::vector<std::vector<Isosurface>> isosurfaces;
+        size_t num_isovalues = 0;
         if (config.find("isovalue") != config.end()) {
-            isosurfaces = extract_isosurfaces(config, brick, mpi_rank, value_range);
+            num_isovalues = config["isovalue"].size();
+            for (const auto &b : bricks) {
+                isosurfaces.push_back(extract_isosurfaces(config, b, mpi_rank, value_range));
+            }
         }
 
         tbb::task_group tasks;
         std::vector<AsyncRender> active_renders;
-        for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
-            cpp::GeometricModel geom_model;
-            if (!isosurfaces.empty()) {
-                geom_model = cpp::GeometricModel(isosurfaces[k]);
-                geom_model.setParam("material", material);
-                geom_model.commit();
-            }
-
+        for (size_t k = 0; k < std::max(num_isovalues, size_t(1)); ++k) {
             for (size_t j = 0; j < colormaps.size(); ++j) {
-                cpp::VolumetricModel model(brick.brick);
-                model.setParam("transferFunction", colormaps[j]);
-                model.commit();
+                std::vector<cpp::Instance> instances;
+                std::vector<box3f> region_bounds;
+                for (size_t rid = 0; rid < bricks.size(); ++rid) {
+                    const auto &b = bricks[rid];
+                    cpp::VolumetricModel model(b.brick);
+                    model.setParam("transferFunction", colormaps[j]);
+                    model.commit();
 
-                cpp::Group group;
-                group.setParam("volume", cpp::Data(model));
-                if (geom_model) {
-                    group.setParam("geometry", cpp::Data(geom_model));
+                    cpp::Group group;
+                    group.setParam("volume", cpp::Data(model));
+                    if (!isosurfaces.empty() && !isosurfaces[rid].empty() &&
+                        isosurfaces[rid][k].n_triangles) {
+                        cpp::GeometricModel gm(isosurfaces[rid][k].geometry);
+                        gm.setParam("material", material);
+                        gm.commit();
+                        group.setParam("geometry", cpp::Data(gm));
+                    }
+                    group.commit();
+
+                    cpp::Instance instance(group);
+                    // We apply a translation to the instance to place it correctly in
+                    // the distributed world
+                    auto transform = affine3f::translate(b.ghost_bounds.lower);
+                    instance.setParam("xfm", transform);
+                    instance.commit();
+                    instances.push_back(instance);
+                    region_bounds.push_back(b.bounds);
                 }
-                group.commit();
-
-                cpp::Instance instance(group);
-                // We apply a translation to the instance to place it correctly in
-                // the distributed world
-                auto transform = affine3f::translate(brick.ghost_bounds.lower);
-                instance.setParam("xfm", transform);
-                instance.commit();
 
                 cpp::World world;
-                world.setParam("instance", cpp::Data(instance));
-                world.setParam("regions", cpp::Data(brick.bounds));
+                world.setParam("instance", cpp::Data(instances));
+                world.setParam("regions", cpp::Data(region_bounds));
                 world.commit();
 
                 for (size_t i = 0; i < camera_set.size(); ++i) {

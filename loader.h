@@ -29,6 +29,8 @@ struct VolumeBrick {
     // full dims includes ghost voxels
     vec3i full_dims;
 
+    vec2f value_range;
+
     std::shared_ptr<is::Array> voxel_data;
 };
 
@@ -38,6 +40,11 @@ struct Camera {
     vec3f up;
 
     Camera(const vec3f &pos, const vec3f &dir, const vec3f &up);
+};
+
+struct Isosurface {
+    size_t n_triangles = 0;
+    cpp::Geometry geometry;
 };
 
 bool compute_divisor(int x, int &divisor);
@@ -66,7 +73,7 @@ std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
 std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string> &files,
                                                   const vec2f &value_range);
 
-std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
-                                               const VolumeBrick &brick,
-                                               const int mpi_rank,
-                                               const vec2f &value_range);
+std::vector<Isosurface> extract_isosurfaces(const json &config,
+                                            const VolumeBrick &brick,
+                                            const int mpi_rank,
+                                            const vec2f &value_range);

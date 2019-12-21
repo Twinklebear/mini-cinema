@@ -5,14 +5,14 @@
     "spp": 2,
     "camera": [
         {
-            "orbit": 4
+            "orbit": 3
         }
     ],
     "colormap": [
         "ice_fire.png",
         "paraview_cool_warm.png"
     ],
-    "isovalue": [0.2, 0.8],
+    "isovalue": [0.5],
     "isosurface_color": [0.2, 0.5, 1.0],
     "background_color": [0, 0, 0]
 }
