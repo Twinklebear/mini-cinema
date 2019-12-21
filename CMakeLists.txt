@@ -9,12 +9,13 @@ find_package(Threads REQUIRED)
 find_package(ospray 2.0 REQUIRED)
 find_package(MPI REQUIRED)
 find_package(TBB REQUIRED)
+find_package(libIS REQUIRED)
 find_package(VTK)
 
 add_executable(mini_cinema main.cpp loader.cpp util.cpp)
 
 set_target_properties(mini_cinema PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 11
     CXX_STANDARD_REQUIRED ON)
 
 
@@ -22,7 +23,8 @@ target_link_libraries(mini_cinema PUBLIC
     ospray::ospray
     ospcommon::ospcommon
     MPI::MPI_CXX
-    TBB::tbb)
+    TBB::tbb
+    is_client)
 
 if (${VTK_FOUND})
     target_compile_definitions(mini_cinema PUBLIC -DVTK_FOUND=1)

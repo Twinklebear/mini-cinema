@@ -1,4 +1,3 @@
-#include "loader.h"
 #include <chrono>
 #include <cstdio>
 #include <iostream>
@@ -20,6 +19,8 @@
 #include <vtkUnsignedCharArray.h>
 #include <vtkUnsignedShortArray.h>
 #endif
+
+#include "loader.h"
 
 Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
     : pos(pos), dir(dir), up(up)
@@ -67,117 +68,48 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
     return faces;
 }
 
-VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_size)
+VolumeBrick load_volume_brick(json &config,
+                              const is::SimState &region,
+                              const int mpi_rank,
+                              const int mpi_size)
 {
     using namespace std::chrono;
     VolumeBrick brick;
 
-    const std::string volume_file = config["volume"].get<std::string>();
-    const vec3i volume_dims = get_vec<int, 3>(config["dimensions"]);
-    const vec3i grid = compute_grid(mpi_size);
-    const vec3i brick_id(
-        mpi_rank % grid.x, (mpi_rank / grid.x) % grid.y, mpi_rank / (grid.x * grid.y));
-
-    brick.dims = volume_dims / grid;
-
-    const vec3f brick_lower = brick_id * brick.dims;
-    const vec3f brick_upper = brick_id * brick.dims + brick.dims;
-
-    brick.bounds = box3f(brick_lower, brick_upper);
+    const std::string field_name = config["field"].get<std::string>();
+    const auto it = region.fields.find(field_name);
+    if (it == region.fields.end()) {
+        std::cerr << "[error]: Requested field " << field_name
+                  << " was not found in the simulation\n";
+        throw std::runtime_error("[error]: Field not found");
+    }
+    const is::Field &field = it->second;
+    brick.voxel_data = field.array;
+    brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
+    brick.bounds = box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
+                         vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
 
     brick.full_dims = brick.dims;
-    vec3i brick_read_offset = brick_lower;
     brick.ghost_bounds = brick.bounds;
-    {
-        const auto ghost_faces = compute_ghost_faces(brick_id, grid);
-        for (size_t i = 0; i < 3; ++i) {
-            if (ghost_faces[i] & NEG_FACE) {
-                brick.full_dims[i] += 1;
-                brick.ghost_bounds.lower[i] -= 1.f;  // todo: base on grid spacing
-                brick_read_offset[i] -= 1;
-            }
-            if (ghost_faces[i] & POS_FACE) {
-                brick.full_dims[i] += 1;
-                brick.ghost_bounds.upper[i] += 1.f;  // todo: base on grid spacing
-            }
-        }
-    }
 
     brick.brick = cpp::Volume("structured_regular");
     brick.brick.setParam("dimensions", brick.full_dims);
     brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
 
-    // Load the sub-bricks using MPI I/O
-    size_t voxel_size = 0;
-    MPI_Datatype voxel_type;
-    const std::string voxel_type_string = config["data_type"].get<std::string>();
-    if (voxel_type_string == "uint8") {
-        voxel_type = MPI_UNSIGNED_CHAR;
-        voxel_size = 1;
-    } else if (voxel_type_string == "uint16") {
-        voxel_type = MPI_UNSIGNED_SHORT;
-        voxel_size = 2;
-    } else if (voxel_type_string == "float32") {
-        voxel_type = MPI_FLOAT;
-        voxel_size = 4;
-    } else if (voxel_type_string == "float64") {
-        voxel_type = MPI_DOUBLE;
-        voxel_size = 8;
-    } else {
-        throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
-    }
-
-    const size_t n_voxels =
-        size_t(brick.full_dims.x) * size_t(brick.full_dims.y) * size_t(brick.full_dims.z);
-    brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
-
-    auto start = high_resolution_clock::now();
-
-    MPI_Datatype brick_type;
-    MPI_Type_create_subarray(3,
-                             &volume_dims.x,
-                             &brick.full_dims.x,
-                             &brick_read_offset.x,
-                             MPI_ORDER_FORTRAN,
-                             voxel_type,
-                             &brick_type);
-    MPI_Type_commit(&brick_type);
-
-    MPI_File file_handle;
-    auto rc = MPI_File_open(
-        MPI_COMM_WORLD, volume_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
-    if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to open file " << volume_file << "\n";
-        throw std::runtime_error("Failed to open " + volume_file);
-    }
-    MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
-    rc = MPI_File_read_all(
-        file_handle, brick.voxel_data->data(), n_voxels, voxel_type, MPI_STATUS_IGNORE);
-    if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to read all voxels from file\n";
-        throw std::runtime_error("Failed to read all voxels from file");
-    }
-    MPI_File_close(&file_handle);
-    MPI_Type_free(&brick_type);
-
-    auto end = high_resolution_clock::now();
-    if (mpi_rank == 0) {
-        std::cout << "Loading volume brick took "
-                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
-    }
-
+    const size_t n_voxels = brick.dims.long_product();
     cpp::Data osp_data;
-    if (voxel_type == MPI_UNSIGNED_CHAR) {
-        osp_data = cpp::Data(*brick.voxel_data, true);
-    } else if (voxel_type == MPI_UNSIGNED_SHORT) {
+    if (field.dataType == UINT8) {
         osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<uint16_t *>(brick.voxel_data->data()), true);
-    } else if (voxel_type == MPI_FLOAT) {
+            cpp::Data(n_voxels, static_cast<const uint8_t *>(brick.voxel_data->data()), true);
+        config["data_type"] = "uint8";
+    } else if (field.dataType == FLOAT) {
         osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<float *>(brick.voxel_data->data()), true);
-    } else if (voxel_type == MPI_DOUBLE) {
+            cpp::Data(n_voxels, static_cast<const float *>(brick.voxel_data->data()), true);
+        config["data_type"] = "float";
+    } else if (field.dataType == DOUBLE) {
         osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<double *>(brick.voxel_data->data()), true);
+            cpp::Data(n_voxels, static_cast<const double *>(brick.voxel_data->data()), true);
+        config["data_type"] = "double";
     } else {
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
@@ -186,18 +118,14 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     // If the value range wasn't provided, compute it
     if (config.find("value_range") == config.end()) {
-        start = high_resolution_clock::now();
-
         vec2f value_range;
-        if (voxel_type == MPI_UNSIGNED_CHAR) {
-            value_range = compute_value_range(brick.voxel_data->data(), n_voxels);
-        } else if (voxel_type == MPI_UNSIGNED_SHORT) {
+        if (field.dataType == UINT8) {
             value_range = compute_value_range(
-                reinterpret_cast<uint16_t *>(brick.voxel_data->data()), n_voxels);
-        } else if (voxel_type == MPI_FLOAT) {
+                reinterpret_cast<uint8_t *>(brick.voxel_data->data()), n_voxels);
+        } else if (field.dataType == FLOAT) {
             value_range = compute_value_range(
                 reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
-        } else if (voxel_type == MPI_DOUBLE) {
+        } else if (field.dataType == DOUBLE) {
             value_range = compute_value_range(
                 reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
         } else {
@@ -211,12 +139,8 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         MPI_Allreduce(
             &value_range.y, &global_value_range.y, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
 
-        end = high_resolution_clock::now();
-
         if (mpi_rank == 0) {
-            std::cout << "Computed value range: " << global_value_range << "\n"
-                      << "Value range computation took "
-                      << duration_cast<milliseconds>(end - start).count() << "ms\n";
+            std::cout << "Computed value range: " << global_value_range << "\n";
         }
         config["value_range"] = {global_value_range.x, global_value_range.y};
     }
@@ -276,6 +200,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         }
         stbi_image_free(data);
 
+        std::cout << "value range: " << value_range << "\n";
         tfn.setParam("color", cpp::Data(colors));
         tfn.setParam("opacity", cpp::Data(opacities));
         tfn.setParam("valueRange", value_range);
@@ -287,7 +212,8 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
                                                const VolumeBrick &brick,
-                                               const int mpi_rank)
+                                               const int mpi_rank,
+                                               const vec2f &value_range)
 {
     using namespace std::chrono;
 
@@ -297,38 +223,39 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
         auto arr = vtkSmartPointer<vtkUnsignedCharArray>::New();
-        arr->SetArray(brick.voxel_data->data(), brick.voxel_data->size(), 1);
+        arr->SetArray(
+            const_cast<uint8_t *>(static_cast<const uint8_t *>(brick.voxel_data->data())),
+            brick.voxel_data->size(),
+            1);
         data_array = arr;
-    } else if (voxel_type_string == "uint16") {
-        auto arr = vtkSmartPointer<vtkUnsignedShortArray>::New();
-        arr->SetArray(reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(uint16_t),
-                      1);
-        data_array = arr;
-    } else if (voxel_type_string == "float32") {
+    } else if (voxel_type_string == "float") {
         auto arr = vtkSmartPointer<vtkFloatArray>::New();
-        arr->SetArray(reinterpret_cast<float *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(float),
-                      1);
+        arr->SetArray(
+            const_cast<float *>(static_cast<const float *>(brick.voxel_data->data())),
+            brick.voxel_data->size(),
+            1);
         data_array = arr;
-    } else if (voxel_type_string == "float64") {
+    } else if (voxel_type_string == "double") {
         auto arr = vtkSmartPointer<vtkDoubleArray>::New();
-        arr->SetArray(reinterpret_cast<double *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(double),
-                      1);
+        arr->SetArray(
+            const_cast<double *>(static_cast<const double *>(brick.voxel_data->data())),
+            brick.voxel_data->size(),
+            1);
         data_array = arr;
     } else {
         throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
     }
 
-    const vec3f grid_spacing = get_vec<float, 3>(config["grid_spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
-    img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
     img_data->GetPointData()->SetScalars(data_array);
 
+    // For simulations isovalues may be best treated as [0, 1] picking a t value along
+    // the range of the simulation's data values. Otherwise we have to know the value range
+    // ahead of time, which we may not know.
     auto isovals = config["isovalue"].get<std::vector<float>>();
-    for (const auto &val : isovals) {
+    for (const auto &v : isovals) {
+        const float val = lerp(v, value_range.x, value_range.y);
         auto start = high_resolution_clock::now();
         vtkSmartPointer<vtkFlyingEdges3D> fedges = vtkSmartPointer<vtkFlyingEdges3D>::New();
         fedges->SetInputData(img_data);

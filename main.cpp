@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <mpi.h>
@@ -32,6 +33,9 @@ const std::string USAGE =
     "Options:\n"
     "  -prefix <name>       Provide a prefix to prepend to the image file names.\n"
     "  -fif <N>             Restrict the number of frames being rendered in parallel.\n"
+    "  -server <host>       Specify rank 0 of the simulation to query data from.\n"
+    "  -port <port>         Specify the port rank 0 of the simulation is listening for "
+    "clients on\n"
     "  -h                   Print this help.";
 
 struct AsyncRender {
@@ -128,6 +132,9 @@ void render_images(const std::vector<std::string> &args)
     json config;
     int frames_in_flight = -1;
     std::string prefix;
+    std::string server;
+    int port = -1;
+    int num_queries = 10;
     for (size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "-prefix") {
             prefix = args[++i] + "-";
@@ -137,6 +144,12 @@ void render_images(const std::vector<std::string> &args)
                 std::cerr << "[error]: Frames in flight must be >= 1\n";
                 return;
             }
+        } else if (args[i] == "-server") {
+            server = args[++i];
+        } else if (args[i] == "-port") {
+            port = std::stoi(args[++i]);
+        } else if (args[i] == "-n") {
+            num_queries = std::stoi(args[++i]);
         } else if (args[i] == "-h") {
             std::cout << USAGE << "\n";
             return;
@@ -144,10 +157,9 @@ void render_images(const std::vector<std::string> &args)
             std::ifstream cfg_file(args[i].c_str());
             cfg_file >> config;
 
-            // Prefix the volume file name with the path to the config file
+            // Prefix the colormap file names with the path to the config file
             const std::string base_path = get_file_basepath(args[i]);
             if (base_path != args[i]) {
-                config["volume"] = base_path + "/" + config["volume"].get<std::string>();
                 for (size_t j = 0; j < config["colormap"].size(); ++j) {
                     config["colormap"][j] =
                         base_path + "/" + config["colormap"][j].get<std::string>();
@@ -155,27 +167,20 @@ void render_images(const std::vector<std::string> &args)
             }
         }
     }
+    if (server.empty() || port < 0) {
+        std::cerr
+            << "[error]: A simulation server (-server) and port (-port) must be specified\n";
+        throw std::runtime_error("Missing server or port arguments");
+    }
 
     if (mpi_rank == 0) {
         std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
     }
 
-    VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
+    // Connect to the simulation
+    is::client::connect(server, port, MPI_COMM_WORLD);
 
-    world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["dimensions"]));
-    const vec2f value_range = get_vec<float, 2>(config["value_range"]);
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
-    const auto colormaps =
-        load_colormaps(config["colormap"].get<std::vector<std::string>>(), value_range);
-    const auto camera_set =
-        load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
-
-    // We don't use the implicit isosurfaces geometry because I want to test
-    // on non-volume objects, e.g. explicit triangle surfaces
-    std::vector<cpp::Geometry> isosurfaces;
-    if (config.find("isovalue") != config.end()) {
-        isosurfaces = extract_isosurfaces(config, brick, mpi_rank);
-    }
 
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
@@ -199,93 +204,120 @@ void render_images(const std::vector<std::string> &args)
     if (config.find("spp") != config.end()) {
         renderer.setParam("spp", config["spp"].get<int>());
     }
-    renderer.setParam("volumeSamplingRate", 1.f);
+    renderer.setParam("volumeSamplingRate", 2.f);
     renderer.commit();
 
-    auto start = high_resolution_clock::now();
-    if (mpi_rank == 0) {
-        std::cout << "Beginning rendering\n";
-    }
-
     const std::string fmt_string =
-        "%0" + std::to_string(static_cast<int>(std::log10(camera_set.size())) + 1) + "d";
-    std::string fmt_out_buf(static_cast<int>(std::log10(camera_set.size())) + 1, '0');
+        "%0" + std::to_string(static_cast<int>(std::log10(num_queries)) + 1) + "d";
+    std::string fmt_out_buf(static_cast<int>(std::log10(num_queries)) + 1, '0');
+    for (int t = 0; t < num_queries; ++t) {
+        if (!is::client::sim_connected()) {
+            break;
+        }
+        // Query the data from the simulation
+        auto regions = is::client::query();
 
-    tbb::task_group tasks;
-    std::vector<AsyncRender> active_renders;
-    for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
-        cpp::GeometricModel geom_model;
-        if (!isosurfaces.empty()) {
-            geom_model = cpp::GeometricModel(isosurfaces[k]);
-            geom_model.setParam("material", material);
-            geom_model.commit();
+        auto start = high_resolution_clock::now();
+        if (mpi_rank == 0) {
+            std::cout << "Beginning rendering\n";
         }
 
-        for (size_t j = 0; j < colormaps.size(); ++j) {
-            cpp::VolumetricModel model(brick.brick);
-            model.setParam("transferFunction", colormaps[j]);
-            model.commit();
+        // TODO: support for multiple regions, we'll need to pass the regions param to
+        // the world.
+        VolumeBrick brick = load_volume_brick(config, regions[0], mpi_rank, mpi_size);
+        world_bounds = box3f(
+            vec3f(regions[0].world.min.x, regions[0].world.min.y, regions[0].world.min.z),
+            vec3f(regions[0].world.max.x, regions[0].world.max.y, regions[0].world.max.z));
+        const vec2f value_range = get_vec<float, 2>(config["value_range"]);
+        const auto colormaps =
+            load_colormaps(config["colormap"].get<std::vector<std::string>>(), value_range);
+        const auto camera_set =
+            load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
+        // We don't use the implicit isosurfaces geometry because I want to test
+        // on non-volume objects, e.g. explicit triangle surfaces
+        std::vector<cpp::Geometry> isosurfaces;
+        if (config.find("isovalue") != config.end()) {
+            isosurfaces = extract_isosurfaces(config, brick, mpi_rank, value_range);
+        }
 
-            cpp::Group group;
-            group.setParam("volume", cpp::Data(model));
-            if (geom_model) {
-                group.setParam("geometry", cpp::Data(geom_model));
+        tbb::task_group tasks;
+        std::vector<AsyncRender> active_renders;
+        for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
+            cpp::GeometricModel geom_model;
+            if (!isosurfaces.empty()) {
+                geom_model = cpp::GeometricModel(isosurfaces[k]);
+                geom_model.setParam("material", material);
+                geom_model.commit();
             }
-            group.commit();
 
-            cpp::Instance instance(group);
-            // We apply a translation to the instance to place it correctly in
-            // the distributed world
-            auto transform = affine3f::translate(brick.ghost_bounds.lower);
-            instance.setParam("xfm", transform);
-            instance.commit();
+            for (size_t j = 0; j < colormaps.size(); ++j) {
+                cpp::VolumetricModel model(brick.brick);
+                model.setParam("transferFunction", colormaps[j]);
+                model.commit();
 
-            cpp::World world;
-            world.setParam("instance", cpp::Data(instance));
-            world.setParam("regions", cpp::Data(brick.bounds));
-            world.commit();
-
-            for (size_t i = 0; i < camera_set.size(); ++i) {
-                cpp::Camera camera("perspective");
-                camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
-                camera.setParam("position", camera_set[i].pos);
-                camera.setParam("direction", camera_set[i].dir);
-                camera.setParam("up", camera_set[i].up);
-                camera.commit();
-
-                std::string fname = prefix + "mini-cinema";
-                if (!isosurfaces.empty()) {
-                    fname += "-iso" + std::to_string(k);
+                cpp::Group group;
+                group.setParam("volume", cpp::Data(model));
+                if (geom_model) {
+                    group.setParam("geometry", cpp::Data(geom_model));
                 }
-                std::sprintf(&fmt_out_buf[0], fmt_string.c_str(), static_cast<int>(i));
-                fname += "-tfn" + std::to_string(j) + "-cam" + fmt_out_buf + ".jpg";
+                group.commit();
 
-                active_renders.emplace_back(renderer, camera, world, img_size, fname);
-                process_finished_renders(active_renders, tasks);
+                cpp::Instance instance(group);
+                // We apply a translation to the instance to place it correctly in
+                // the distributed world
+                auto transform = affine3f::translate(brick.ghost_bounds.lower);
+                instance.setParam("xfm", transform);
+                instance.commit();
 
-                while (active_renders.size() >= frames_in_flight) {
+                cpp::World world;
+                world.setParam("instance", cpp::Data(instance));
+                world.setParam("regions", cpp::Data(brick.bounds));
+                world.commit();
+
+                for (size_t i = 0; i < camera_set.size(); ++i) {
+                    cpp::Camera camera("perspective");
+                    camera.setParam("aspect", static_cast<float>(img_size.x) / img_size.y);
+                    camera.setParam("position", camera_set[i].pos);
+                    camera.setParam("direction", camera_set[i].dir);
+                    camera.setParam("up", camera_set[i].up);
+                    camera.commit();
+
+                    std::string fname = prefix + "mini-cinema";
+                    if (!isosurfaces.empty()) {
+                        fname += "-iso" + std::to_string(k);
+                    }
+                    std::sprintf(&fmt_out_buf[0], fmt_string.c_str(), static_cast<int>(t));
+                    fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + "-df" +
+                             fmt_out_buf + ".jpg";
+
+                    active_renders.emplace_back(renderer, camera, world, img_size, fname);
                     process_finished_renders(active_renders, tasks);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+                    while (active_renders.size() >= frames_in_flight) {
+                        process_finished_renders(active_renders, tasks);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    }
                 }
             }
         }
+        while (!active_renders.empty()) {
+            process_finished_renders(active_renders, tasks);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        auto end = high_resolution_clock::now();
+        if (mpi_rank == 0) {
+            std::cout << "All renders completed in "
+                      << duration_cast<milliseconds>(end - start).count() << "ms\n";
+        }
+        // Wait for image writes to complete
+        tasks.wait();
+        end = high_resolution_clock::now();
+        if (mpi_rank == 0) {
+            std::cout << "Full run (renders + saving images) completed in "
+                      << duration_cast<milliseconds>(end - start).count() << "ms\n";
+        }
     }
-    while (!active_renders.empty()) {
-        process_finished_renders(active_renders, tasks);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    auto end = high_resolution_clock::now();
-    if (mpi_rank == 0) {
-        std::cout << "All renders completed in "
-                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
-    }
-    // Wait for image writes to complete
-    tasks.wait();
-    end = high_resolution_clock::now();
-    if (mpi_rank == 0) {
-        std::cout << "Full run (renders + saving images) completed in "
-                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
-    }
+    is::client::disconnect();
 }
 
 void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks)

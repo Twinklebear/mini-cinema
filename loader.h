@@ -10,6 +10,8 @@
 #include <ospray/ospray_cpp.h>
 #include "json.hpp"
 
+#include <libIS/is_client.h>
+
 using namespace ospray;
 using namespace ospcommon;
 using namespace ospcommon::math;
@@ -27,7 +29,7 @@ struct VolumeBrick {
     // full dims includes ghost voxels
     vec3i full_dims;
 
-    std::shared_ptr<std::vector<uint8_t>> voxel_data;
+    std::shared_ptr<is::Array> voxel_data;
 };
 
 struct Camera {
@@ -53,7 +55,10 @@ enum GhostFace { NEITHER_FACE = 0, POS_FACE = 1, NEG_FACE = 2 };
  */
 std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid);
 
-VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_size);
+VolumeBrick load_volume_brick(json &config,
+                              const is::SimState &region,
+                              const int mpi_rank,
+                              const int mpi_size);
 
 std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
                                  const box3f &world_bounds);
@@ -63,5 +68,5 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
                                                const VolumeBrick &brick,
-                                               const int mpi_rank);
-
+                                               const int mpi_rank,
+                                               const vec2f &value_range);
