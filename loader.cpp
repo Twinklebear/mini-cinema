@@ -88,6 +88,7 @@ VolumeBrick load_volume_brick(json &config,
     brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
     brick.bounds = box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
                          vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
+    const vec3f spacing = get_vec<int, 3>(config["spacing"]);
     brick.full_dims = brick.dims;
     // TODO: This is assuming the sim isn't giving us ghost zone data
     brick.ghost_bounds = brick.bounds;

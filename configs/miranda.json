@@ -12,7 +12,7 @@
     ],
     "colormap": [
         "ice_fire.png",
-        "cool_warm_paraview.png"
+        "paraview_cool_warm.png"
     ],
     "_isovalue": [1.5],
     "isosurface_color": [0.2, 0.5, 1.0],
