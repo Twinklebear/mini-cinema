@@ -162,7 +162,7 @@ void render_images(const std::vector<std::string> &args)
 
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
 
-    world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["dimensions"]));
+    world_bounds = box3f(vec3f(0), get_vec<float, 3>(config["size"]));
     const vec2f value_range = get_vec<float, 2>(config["value_range"]);
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
     const auto colormaps =

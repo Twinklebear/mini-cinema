@@ -1,9 +1,9 @@
 {
     "volume": "present_492x492x442_uint16.raw",
-    "dimensions": [492, 492, 442],
-    "data_type": "uint16",
+    "size": [492, 492, 442],
+    "type": "uint16",
     "value_range": [0, 4095],
-    "grid_spacing": [1, 1, 1],
+    "spacing": [1, 1, 1],
     "image_size": [512, 512],
     "camera": [
         {

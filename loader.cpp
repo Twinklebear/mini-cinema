@@ -73,7 +73,8 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     VolumeBrick brick;
 
     const std::string volume_file = config["volume"].get<std::string>();
-    const vec3i volume_dims = get_vec<int, 3>(config["dimensions"]);
+    const vec3i volume_dims = get_vec<int, 3>(config["size"]);
+    const vec3f spacing = get_vec<int, 3>(config["spacing"];
     const vec3i grid = compute_grid(mpi_size);
     const vec3i brick_id(
         mpi_rank % grid.x, (mpi_rank / grid.x) % grid.y, mpi_rank / (grid.x * grid.y));
@@ -93,24 +94,24 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         for (size_t i = 0; i < 3; ++i) {
             if (ghost_faces[i] & NEG_FACE) {
                 brick.full_dims[i] += 1;
-                brick.ghost_bounds.lower[i] -= 1.f;  // todo: base on grid spacing
+                brick.ghost_bounds.lower[i] -= spacing[i];
                 brick_read_offset[i] -= 1;
             }
             if (ghost_faces[i] & POS_FACE) {
                 brick.full_dims[i] += 1;
-                brick.ghost_bounds.upper[i] += 1.f;  // todo: base on grid spacing
+                brick.ghost_bounds.upper[i] += spacing[i];
             }
         }
     }
 
     brick.brick = cpp::Volume("structured_regular");
     brick.brick.setParam("dimensions", brick.full_dims);
-    brick.brick.setParam("gridSpacing", get_vec<int, 3>(config["grid_spacing"]));
+    brick.brick.setParam("gridSpacing", spacing);
 
     // Load the sub-bricks using MPI I/O
     size_t voxel_size = 0;
     MPI_Datatype voxel_type;
-    const std::string voxel_type_string = config["data_type"].get<std::string>();
+    const std::string voxel_type_string = config["type"].get<std::string>();
     if (voxel_type_string == "uint8") {
         voxel_type = MPI_UNSIGNED_CHAR;
         voxel_size = 1;
@@ -293,7 +294,7 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
 
     std::vector<cpp::Geometry> isosurfaces;
 #ifdef VTK_FOUND
-    const std::string voxel_type_string = config["data_type"].get<std::string>();
+    const std::string voxel_type_string = config["type"].get<std::string>();
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
         auto arr = vtkSmartPointer<vtkUnsignedCharArray>::New();
@@ -321,7 +322,7 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
         throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
     }
 
-    const vec3f grid_spacing = get_vec<float, 3>(config["grid_spacing"]);
+    const vec3f grid_spacing = get_vec<float, 3>(config["spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
     img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
