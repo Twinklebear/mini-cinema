@@ -81,6 +81,6 @@ download the corresponding RAW volume.
 
 - Intel TBB
 - MPI
-- OSPRay 2.0, with the MPI module. This will likely need to be built from source
+- [OSPRay 2.0](https://github.com/ospray/ospray/tree/release-2.0.x), with the [MPI module](https://github.com/ospray/module_mpi/). This will likely need to be built from source
 - VTK (optional, for isosurface extraction)
 
