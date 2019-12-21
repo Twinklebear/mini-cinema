@@ -16,52 +16,63 @@ download the corresponding RAW volume.
 
 ```json
 {
-    The volume file name to be used, path is should be relative to
-    the directory containing the JSON config file
+    "The volume file name to be used, path is should be relative to
+    the directory containing the JSON config file"
     "volume": "foot_256x256x256_uint8.raw",
-    Dimensions of the volume in voxels
+
+    "Dimensions of the volume in voxels"
     "size": [256, 256, 256],
-    Data type of the voxels
+
+    "Data type of the voxels"
     "type": "uint8",
-    The physical size of each voxel
+
+    "The physical size of each voxel"
     "spacing": [1, 1, 1],
-    The value range of the data (optional, if not set it will be calculated)
+
+    "The value range of the data (optional, if not set it will be calculated)"
     "value_range": [0, 255],
-    The dimensions of the image to render
+
+    "The dimensions of the image to render"
     "image_size": [512, 512],
-    Samples per-pixel to take when rendering each image
+
+    "Samples per-pixel to take when rendering each image"
     "spp": 2,
-    A list of camera positions or orbit counts to render
+
+    "A list of camera positions or orbit counts to render"
     "camera": [
         {
-            A specific camera position can be specified by the
-            camera position, direction and up vector
+            "A specific camera position can be specified by the
+            camera position, direction and up vector"
             "pos": [128, 128, -256],
             "dir": [0, 0, 1],
             "up": [0, 1, 0]
         },
         {
-            A set of camera positions orbiting a sphere around
+            "A set of camera positions orbiting a sphere around
             the data set can be specified as an orbit, and the
-            number of points on this orbit to render
+            number of points on this orbit to render"
             "orbit": 2
         }
     ],
-    A list of colormaps to render with, can be RGB or full RGBA.
+
+    "A list of colormaps to render with, can be RGB or full RGBA.
     RGBA colormaps will use the alpha channel to set opacity in
     the transfer function. Paths should be relative to the directory
-    containing the JSON config file
+    containing the JSON config file"
     "colormap": [
         "ice_fire.png",
         "jet.png",
         "paraview_cool_warm.png"
     ],
-    A set of isovalues to render with (requires VTK, since it tests
-    using explicit geometry)
+
+    "A set of isovalues to render with (requires VTK, since it tests
+    using explicit geometry)"
     "isovalue": [128, 200, 150],
-    Color to use for the isosufaces
+
+    "Color to use for the isosufaces"
     "isosurface_color": [0.2, 0.5, 1.0],
-    Image background color, values in [0, 1]
+
+    "Image background color, values in [0, 1]"
     "background_color": [0, 0, 0]
 }
 ```
