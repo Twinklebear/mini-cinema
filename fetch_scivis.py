@@ -13,11 +13,12 @@ if len(sys.argv) != 2:
 
 r = requests.get("http://sci.utah.edu/~klacansky/cdn/open-scivis-datasets/{}/{}.json".format(sys.argv[1], sys.argv[1]))
 
+script_path = os.path.dirname(os.path.realpath(__file__))
+work_path = os.getcwd()
+
 meta = r.json()
 volume_path = urlparse(meta["url"])
-meta["volume"] = os.path.basename(volume_path.path)
-
-config_path = os.path.dirname(os.path.realpath(__file__))
+meta["volume"] = os.path.normpath(work_path + "/" + os.path.basename(volume_path.path))
 
 meta["spp"] = 1
 meta["camera"] = [
@@ -29,7 +30,7 @@ meta["camera"] = [
         {
             "orbit": 1
         }]
-meta["colormap"] = [os.path.normpath(config_path + "/configs/paraview_cool_warm.png")]
+meta["colormap"] = [os.path.normpath(script_path + "/configs/paraview_cool_warm.png")]
 meta["isosurface_color"] = [0.2, 0.5, 1.0]
 meta["background_color"] = [0, 0, 0]
 meta["image_size"] = [512, 512]
