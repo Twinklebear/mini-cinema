@@ -11,7 +11,11 @@ find_package(MPI REQUIRED)
 find_package(TBB REQUIRED)
 find_package(VTK)
 
-add_executable(mini_cinema main.cpp loader.cpp util.cpp)
+add_executable(mini_cinema
+    main.cpp
+    loader.cpp
+    util.cpp
+    profiling.cpp)
 
 set_target_properties(mini_cinema PROPERTIES
     CXX_STANDARD 14

@@ -8,8 +8,10 @@
 #include <ospray/ospray_cpp.h>
 #include <tbb/task_group.h>
 #include <tbb/tbb.h>
+#include <unistd.h>
 #include "json.hpp"
 #include "loader.h"
+#include "profiling.h"
 #include "util.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -27,6 +29,7 @@ int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
 bool save_images = true;
+bool detailed_cpu_stats = false;
 
 const std::string USAGE =
     "./mini_cinema <config.json> [options]\n"
@@ -34,6 +37,7 @@ const std::string USAGE =
     "  -prefix <name>       Provide a prefix to prepend to the image file names.\n"
     "  -fif <N>             Restrict the number of frames being rendered in parallel.\n"
     "  -no-output           Don't save output images (useful for benchmarking).\n"
+    "  -detailed-stats      Record and print statistics about CPU use, thread pinning, etc.\n"
     "  -h                   Print this help.";
 
 struct AsyncRender {
@@ -59,11 +63,12 @@ AsyncRender::AsyncRender(cpp::Renderer renderer,
                          cpp::World world,
                          vec2i img,
                          std::string output_file)
-    : img_size(img),
-      fb(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM),
-      future(fb.renderFrame(renderer, camera, world)),
-      output_file(output_file)
+    : img_size(img), output_file(output_file)
 {
+    fb = cpp::FrameBuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+    fb.setParam("timeCompositingOverhead", 0);
+    fb.commit();
+    future = fb.renderFrame(renderer, camera, world);
 }
 
 bool AsyncRender::finished() const
@@ -96,8 +101,6 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
     MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_ARE_FATAL);
-
-    std::cout << "rank " << mpi_rank << "/" << mpi_size << "\n";
 
     {
         ospLoadModule("mpi");
@@ -141,6 +144,8 @@ void render_images(const std::vector<std::string> &args)
             }
         } else if (args[i] == "-no-output") {
             save_images = false;
+        } else if (args[i] == "-detailed-stats") {
+            detailed_cpu_stats = true;
         } else if (args[i] == "-h") {
             std::cout << USAGE << "\n";
             return;
@@ -152,6 +157,21 @@ void render_images(const std::vector<std::string> &args)
 
     if (mpi_rank == 0) {
         std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
+    }
+
+    char hostname[HOST_NAME_MAX + 1] = {0};
+    gethostname(hostname, HOST_NAME_MAX);
+    if (!detailed_cpu_stats) {
+        std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname << "\n";
+    } else {
+        for (int i = 0; i < mpi_size; ++i) {
+            if (i == mpi_rank) {
+                std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname
+                          << "\n"
+                          << get_file_content("/proc/self/status") << "\n=========\n";
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
     }
 
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
@@ -196,7 +216,6 @@ void render_images(const std::vector<std::string> &args)
     renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
 
-    auto start = high_resolution_clock::now();
     if (mpi_rank == 0) {
         std::cout << "Beginning rendering\n";
     }
@@ -205,6 +224,7 @@ void render_images(const std::vector<std::string> &args)
         "%0" + std::to_string(static_cast<int>(std::log10(camera_set.size())) + 1) + "d";
     std::string fmt_out_buf(static_cast<int>(std::log10(camera_set.size())) + 1, '0');
 
+    ProfilingPoint start;
     tbb::task_group tasks;
     std::vector<AsyncRender> active_renders;
     for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
@@ -268,17 +288,26 @@ void render_images(const std::vector<std::string> &args)
         process_finished_renders(active_renders, tasks);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    auto end = high_resolution_clock::now();
+    ProfilingPoint end;
     if (mpi_rank == 0) {
-        std::cout << "All renders completed in "
-                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
+        std::cout << "All renders completed in " << elapsed_time_ms(start, end) << "ms\n";
     }
+    if (detailed_cpu_stats) {
+        for (int i = 0; i < mpi_size; ++i) {
+            if (i == mpi_rank) {
+                std::cout << "rank " << mpi_rank << "/" << mpi_size
+                          << ", CPU: " << cpu_utilization(start, end) << "%\n";
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+    }
+
     // Wait for image writes to complete
     tasks.wait();
-    end = high_resolution_clock::now();
+    end = ProfilingPoint();
     if (mpi_rank == 0) {
         std::cout << "Full run (renders + saving images) completed in "
-                  << duration_cast<milliseconds>(end - start).count() << "ms\n";
+                  << elapsed_time_ms(start, end) << "ms\n";
     }
 }
 
