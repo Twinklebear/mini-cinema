@@ -37,12 +37,15 @@ meta["image_size"] = [512, 512]
 
 print("Data set Information")
 print(json.dumps(meta, indent=4))
-r = requests.get(meta["url"])
-data = bytes(r.content)
 
-with open(sys.argv[1] + ".json", "w") as f:
+with open(sys.argv[1] + "_cinema.json", "w") as f:
     f.write(json.dumps(meta, indent=4))
 
-with open(os.path.basename(meta["url"]), "wb") as f:
-    f.write(data)
+if not os.path.isfile(meta["volume"]):
+    r = requests.get(meta["url"])
+    data = bytes(r.content)
+    with open(os.path.basename(meta["volume"]), "wb") as f:
+        f.write(data)
+else:
+    print("File {} already exists, not re-downloading".format(meta["volume"]))
 
