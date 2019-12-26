@@ -26,12 +26,14 @@ using json = nlohmann::json;
 int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
+bool save_images = true;
 
 const std::string USAGE =
     "./mini_cinema <config.json> [options]\n"
     "Options:\n"
     "  -prefix <name>       Provide a prefix to prepend to the image file names.\n"
     "  -fif <N>             Restrict the number of frames being rendered in parallel.\n"
+    "  -no-output           Don't save output images (useful for benchmarking).\n"
     "  -h                   Print this help.";
 
 struct AsyncRender {
@@ -137,6 +139,8 @@ void render_images(const std::vector<std::string> &args)
                 std::cerr << "[error]: Frames in flight must be >= 1\n";
                 return;
             }
+        } else if (args[i] == "-no-output") {
+            save_images = false;
         } else if (args[i] == "-h") {
             std::cout << USAGE << "\n";
             return;
@@ -283,10 +287,12 @@ void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group
     auto done = std::stable_partition(
         renders.begin(), renders.end(), [](const AsyncRender &a) { return !a.finished(); });
 
-    for (auto it = done; it != renders.end(); ++it) {
-        AsyncRender r = *it;
-        if (mpi_rank == 0) {
-            tasks.run([r]() { r.save_image(); });
+    if (save_images) {
+        for (auto it = done; it != renders.end(); ++it) {
+            AsyncRender r = *it;
+            if (mpi_rank == 0) {
+                tasks.run([r]() { r.save_image(); });
+            }
         }
     }
 
