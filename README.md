@@ -17,6 +17,11 @@ mpirun -n <N> ./mini-cinema ../configs/libis_example_sim.json \
     -server localhost -port 29374 -n 10
 ```
 
+To run just pass the config file:
+```
+mpirun -n <N> ./mini-cinema <config.json>
+```
+
 ```json
 {
     "The field name to render from the list of fields sent back by the simulation"
@@ -50,12 +55,10 @@ mpirun -n <N> ./mini-cinema ../configs/libis_example_sim.json \
 
     "A list of colormaps to render with, can be RGB or full RGBA.
     RGBA colormaps will use the alpha channel to set opacity in
-    the transfer function. Paths should be relative to the directory
-    containing the JSON config file"
+    the transfer function. Paths should be relative to the JSON file"
     "colormap": [
         "ice_fire.png",
-        "jet.png",
-        "paraview_cool_warm.png"
+        "jet.png"
     ],
 
     "A set of isovalues to render with (requires VTK, since it tests

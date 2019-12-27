@@ -4,6 +4,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <mpi.h>
 
 std::string get_file_content(const std::string &fname)
 {
@@ -45,6 +47,14 @@ std::string get_file_basepath(const std::string &path)
 bool starts_with(const std::string &str, const std::string &prefix)
 {
     return std::strncmp(str.c_str(), prefix.c_str(), prefix.size()) == 0;
+}
+
+std::string get_mpi_error(const int error_code)
+{
+    int err_len = 0;
+    std::string err_str(size_t(MPI_MAX_ERROR_STRING + 1), '\0');
+    MPI_Error_string(error_code, &err_str[0], &err_len);
+    return err_str;
 }
 
 std::vector<vec3f> generate_fibonacci_sphere(const size_t n_points, const float radius)

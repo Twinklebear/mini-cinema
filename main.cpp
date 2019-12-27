@@ -9,8 +9,10 @@
 #include <ospray/ospray_cpp.h>
 #include <tbb/task_group.h>
 #include <tbb/tbb.h>
+#include <unistd.h>
 #include "json.hpp"
 #include "loader.h"
+#include "profiling.h"
 #include "util.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -27,6 +29,8 @@ using json = nlohmann::json;
 int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
+bool save_images = true;
+bool detailed_cpu_stats = false;
 
 const std::string USAGE =
     "./mini_cinema <config.json> [options]\n"
@@ -36,6 +40,8 @@ const std::string USAGE =
     "  -server <host>       Specify rank 0 of the simulation to query data from.\n"
     "  -port <port>         Specify the port rank 0 of the simulation is listening for "
     "clients on\n"
+    "  -no-output           Don't save output images (useful for benchmarking).\n"
+    "  -detailed-stats      Record and print statistics about CPU use, thread pinning, etc.\n"
     "  -h                   Print this help.";
 
 struct AsyncRender {
@@ -61,11 +67,12 @@ AsyncRender::AsyncRender(cpp::Renderer renderer,
                          cpp::World world,
                          vec2i img,
                          std::string output_file)
-    : img_size(img),
-      fb(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM),
-      future(fb.renderFrame(renderer, camera, world)),
-      output_file(output_file)
+    : img_size(img), output_file(output_file)
 {
+    fb = cpp::FrameBuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+    fb.setParam("timeCompositingOverhead", 0);
+    fb.commit();
+    future = fb.renderFrame(renderer, camera, world);
 }
 
 bool AsyncRender::finished() const
@@ -98,8 +105,6 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
     MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_ARE_FATAL);
-
-    std::cout << "rank " << mpi_rank << "/" << mpi_size << "\n";
 
     {
         ospLoadModule("mpi");
@@ -142,7 +147,7 @@ void render_images(const std::vector<std::string> &args)
             frames_in_flight = std::stof(args[++i]);
             if (frames_in_flight <= 0) {
                 std::cerr << "[error]: Frames in flight must be >= 1\n";
-                return;
+                throw std::runtime_error("Frames in flight must be >= 1");
             }
         } else if (args[i] == "-server") {
             server = args[++i];
@@ -150,13 +155,21 @@ void render_images(const std::vector<std::string> &args)
             port = std::stoi(args[++i]);
         } else if (args[i] == "-n") {
             num_queries = std::stoi(args[++i]);
+        } else if (args[i] == "-no-output") {
+            save_images = false;
+        } else if (args[i] == "-detailed-stats") {
+            detailed_cpu_stats = true;
         } else if (args[i] == "-h") {
             std::cout << USAGE << "\n";
             return;
         } else {
             std::ifstream cfg_file(args[i].c_str());
-            cfg_file >> config;
+            if (!cfg_file) {
+                std::cerr << "[error]: Failed to open config file " << args[i] << "\n";
+                throw std::runtime_error("Failed to open input config file");
+            }
 
+            cfg_file >> config;
             // Prefix the colormap file names with the path to the config file
             const std::string base_path = get_file_basepath(args[i]);
             if (base_path != args[i]) {
@@ -179,6 +192,20 @@ void render_images(const std::vector<std::string> &args)
 
     // Connect to the simulation
     is::client::connect(server, port, MPI_COMM_WORLD);
+    char hostname[HOST_NAME_MAX + 1] = {0};
+    gethostname(hostname, HOST_NAME_MAX);
+    if (!detailed_cpu_stats) {
+        std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname << "\n";
+    } else {
+        for (int i = 0; i < mpi_size; ++i) {
+            if (i == mpi_rank) {
+                std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname
+                          << "\n"
+                          << get_file_content("/proc/self/status") << "\n=========\n";
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+    }
 
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
 
@@ -365,10 +392,12 @@ void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group
     auto done = std::stable_partition(
         renders.begin(), renders.end(), [](const AsyncRender &a) { return !a.finished(); });
 
-    for (auto it = done; it != renders.end(); ++it) {
-        AsyncRender r = *it;
-        if (mpi_rank == 0) {
-            tasks.run([r]() { r.save_image(); });
+    if (save_images) {
+        for (auto it = done; it != renders.end(); ++it) {
+            AsyncRender r = *it;
+            if (mpi_rank == 0) {
+                tasks.run([r]() { r.save_image(); });
+            }
         }
     }
 
