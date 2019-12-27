@@ -148,14 +148,16 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     auto rc = MPI_File_open(
         MPI_COMM_WORLD, volume_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
     if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to open file " << volume_file << "\n";
+        std::cerr << "[error]: Failed to open file " << volume_file
+                  << ". MPI Error: " << get_mpi_error(rc) << "\n";
         throw std::runtime_error("Failed to open " + volume_file);
     }
     MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
     rc = MPI_File_read_all(
         file_handle, brick.voxel_data->data(), n_voxels, voxel_type, MPI_STATUS_IGNORE);
     if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to read all voxels from file\n";
+        std::cerr << "[error]: Failed to read all voxels from file. MPI Error: "
+                  << get_mpi_error(rc) << "\n";
         throw std::runtime_error("Failed to read all voxels from file");
     }
     MPI_File_close(&file_handle);
