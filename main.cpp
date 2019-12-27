@@ -140,7 +140,7 @@ void render_images(const std::vector<std::string> &args)
             frames_in_flight = std::stof(args[++i]);
             if (frames_in_flight <= 0) {
                 std::cerr << "[error]: Frames in flight must be >= 1\n";
-                return;
+                throw std::runtime_error("Frames in flight must be >= 1");
             }
         } else if (args[i] == "-no-output") {
             save_images = false;
@@ -151,6 +151,10 @@ void render_images(const std::vector<std::string> &args)
             return;
         } else {
             std::ifstream cfg_file(args[i].c_str());
+            if (!cfg_file) {
+                std::cerr << "[error]: Failed to open config file " << args[i] << "\n";
+                throw std::runtime_error("Failed to open input config file");
+            }
             cfg_file >> config;
         }
     }

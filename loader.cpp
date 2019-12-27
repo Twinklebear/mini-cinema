@@ -133,16 +133,11 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
 
     auto start = high_resolution_clock::now();
-
-    MPI_Datatype brick_type;
-    MPI_Type_create_subarray(3,
-                             &volume_dims.x,
-                             &brick.full_dims.x,
-                             &brick_read_offset.x,
-                             MPI_ORDER_FORTRAN,
-                             voxel_type,
-                             &brick_type);
-    MPI_Type_commit(&brick_type);
+    // MPI still uses 32-bit signed ints for counts of objects, so we have to split reads
+    // of large data up so the count doesn't overflow. This assumes each X-Y slice is within
+    // that size limit and reads chunks
+    const size_t n_chunks = n_voxels / std::numeric_limits<int32_t>::max() +
+                            (n_voxels % std::numeric_limits<int32_t>::max() > 0 ? 1 : 0);
 
     MPI_File file_handle;
     auto rc = MPI_File_open(
@@ -152,16 +147,42 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
                   << ". MPI Error: " << get_mpi_error(rc) << "\n";
         throw std::runtime_error("Failed to open " + volume_file);
     }
-    MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
-    rc = MPI_File_read_all(
-        file_handle, brick.voxel_data->data(), n_voxels, voxel_type, MPI_STATUS_IGNORE);
-    if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to read all voxels from file. MPI Error: "
-                  << get_mpi_error(rc) << "\n";
-        throw std::runtime_error("Failed to read all voxels from file");
+    for (size_t i = 0; i < n_chunks; ++i) {
+        const size_t chunk_thickness = brick.full_dims.z / n_chunks;
+        const vec3i chunk_offset(brick_read_offset.x,
+                                 brick_read_offset.y,
+                                 brick_read_offset.z + i * chunk_thickness);
+        vec3i chunk_dims = vec3i(brick.full_dims.x, brick.full_dims.y, chunk_thickness);
+        if (chunk_offset.z + chunk_thickness >= brick.full_dims.z) {
+            chunk_dims.z = brick.full_dims.z - chunk_offset.z;
+        }
+        const size_t byte_offset = i * chunk_thickness * brick.full_dims.y * brick.full_dims.x;
+        const int chunk_voxels = chunk_dims.long_product();
+
+        MPI_Datatype brick_type;
+        MPI_Type_create_subarray(3,
+                                 &volume_dims.x,
+                                 &chunk_dims.x,
+                                 &chunk_offset.x,
+                                 MPI_ORDER_FORTRAN,
+                                 voxel_type,
+                                 &brick_type);
+        MPI_Type_commit(&brick_type);
+
+        MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
+        rc = MPI_File_read_all(file_handle,
+                               brick.voxel_data->data() + byte_offset,
+                               chunk_voxels,
+                               voxel_type,
+                               MPI_STATUS_IGNORE);
+        if (rc != MPI_SUCCESS) {
+            std::cerr << "[error]: Failed to read all voxels from file. MPI Error: "
+                      << get_mpi_error(rc) << "\n";
+            throw std::runtime_error("Failed to read all voxels from file");
+        }
+        MPI_Type_free(&brick_type);
     }
     MPI_File_close(&file_handle);
-    MPI_Type_free(&brick_type);
 
     auto end = high_resolution_clock::now();
     if (mpi_rank == 0) {
