@@ -153,8 +153,8 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
                                  brick_read_offset.y,
                                  brick_read_offset.z + i * chunk_thickness);
         vec3i chunk_dims = vec3i(brick.full_dims.x, brick.full_dims.y, chunk_thickness);
-        if (chunk_offset.z + chunk_thickness >= brick.full_dims.z) {
-            chunk_dims.z = brick.full_dims.z - chunk_offset.z;
+        if (i * chunk_thickness + chunk_thickness >= brick.full_dims.z) {
+            chunk_dims.z = brick.full_dims.z - i * chunk_thickness;
         }
         const size_t byte_offset = i * chunk_thickness * brick.full_dims.y * brick.full_dims.x;
         const int chunk_voxels = chunk_dims.long_product();
