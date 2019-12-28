@@ -197,7 +197,11 @@ void render_images(const std::vector<std::string> &args)
 
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
-        material.setParam("Kd", get_vec<float, 3>(config["isosurface_color"]));
+        auto color = config["isosurface_color"].get<std::vector<float>>();
+        material.setParam("Kd", vec3f(color[0], color[1], color[2]));
+        if (color.size() == 4) {
+            material.setParam("d", color[3]);
+        }
     } else {
         material.setParam("Kd", vec3f(1.f));
     }
