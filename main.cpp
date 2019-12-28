@@ -188,11 +188,33 @@ void render_images(const std::vector<std::string> &args)
     const auto camera_set =
         load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
 
+    // create and setup an ambient light
+    cpp::Light ambient_light("ambient");
+    ambient_light.commit();
+
+    cpp::Renderer renderer("mpi_raycast");
+    renderer.setParam("light", cpp::Data(ambient_light));
+    if (config.find("background_color") != config.end()) {
+        renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
+    }
+    if (config.find("spp") != config.end()) {
+        renderer.setParam("spp", config["spp"].get<int>());
+    }
+    bool isosurface_full_volume = false;
+    if (config.find("ao") != config.end()) {
+        // If we want AO we compute the isosurface of the entire volume on each rank
+        // so that it's available for AO rays
+        isosurface_full_volume = true;
+        renderer.setParam("aoSamples", config["ao"].get<int>());
+    }
+    renderer.setParam("volumeSamplingRate", 1.f);
+    renderer.commit();
+
     // We don't use the implicit isosurfaces geometry because I want to test
     // on non-volume objects, e.g. explicit triangle surfaces
     std::vector<cpp::Geometry> isosurfaces;
     if (config.find("isovalue") != config.end()) {
-        isosurfaces = extract_isosurfaces(config, brick, mpi_rank);
+        isosurfaces = extract_isosurfaces(config, brick, mpi_rank, isosurface_full_volume);
     }
 
     cpp::Material material("scivis", "default");
@@ -206,23 +228,6 @@ void render_images(const std::vector<std::string> &args)
         material.setParam("Kd", vec3f(1.f));
     }
     material.commit();
-
-    // create and setup an ambient light
-    cpp::Light ambient_light("ambient");
-    ambient_light.commit();
-
-    // WILL TODO: mpi raycast progressive refinement/jittering is disabled?
-    // though after accumulation i do see some artifacts in scivis too
-    cpp::Renderer renderer("mpi_raycast");
-    renderer.setParam("light", cpp::Data(ambient_light));
-    if (config.find("background_color") != config.end()) {
-        renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
-    }
-    if (config.find("spp") != config.end()) {
-        renderer.setParam("spp", config["spp"].get<int>());
-    }
-    renderer.setParam("volumeSamplingRate", 1.f);
-    renderer.commit();
 
     if (mpi_rank == 0) {
         std::cout << "Beginning rendering\n";

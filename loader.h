@@ -63,5 +63,11 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
                                                const VolumeBrick &brick,
-                                               const int mpi_rank);
+                                               const int mpi_rank,
+                                               const bool isosurface_full_volume);
 
+std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
+                                                      const std::string &dtype,
+                                                      const vec3i &vol_dims,
+                                                      const vec3i &brick_dims,
+                                                      const vec3i &brick_offset);

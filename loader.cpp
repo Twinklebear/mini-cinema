@@ -108,81 +108,13 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     brick.brick.setParam("dimensions", brick.full_dims);
     brick.brick.setParam("gridSpacing", spacing);
 
-    // Load the sub-bricks using MPI I/O
-    size_t voxel_size = 0;
-    MPI_Datatype voxel_type;
-    const std::string voxel_type_string = config["type"].get<std::string>();
-    if (voxel_type_string == "uint8") {
-        voxel_type = MPI_UNSIGNED_CHAR;
-        voxel_size = 1;
-    } else if (voxel_type_string == "uint16") {
-        voxel_type = MPI_UNSIGNED_SHORT;
-        voxel_size = 2;
-    } else if (voxel_type_string == "float32") {
-        voxel_type = MPI_FLOAT;
-        voxel_size = 4;
-    } else if (voxel_type_string == "float64") {
-        voxel_type = MPI_DOUBLE;
-        voxel_size = 8;
-    } else {
-        throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
-    }
-
-    const size_t n_voxels =
-        size_t(brick.full_dims.x) * size_t(brick.full_dims.y) * size_t(brick.full_dims.z);
-    brick.voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
+    const std::string voxel_type = config["type"].get<std::string>();
+    const size_t n_voxels = brick.full_dims.long_product();
 
     auto start = high_resolution_clock::now();
-    // MPI still uses 32-bit signed ints for counts of objects, so we have to split reads
-    // of large data up so the count doesn't overflow. This assumes each X-Y slice is within
-    // that size limit and reads chunks
-    const size_t n_chunks = n_voxels / std::numeric_limits<int32_t>::max() +
-                            (n_voxels % std::numeric_limits<int32_t>::max() > 0 ? 1 : 0);
 
-    MPI_File file_handle;
-    auto rc = MPI_File_open(
-        MPI_COMM_WORLD, volume_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
-    if (rc != MPI_SUCCESS) {
-        std::cerr << "[error]: Failed to open file " << volume_file
-                  << ". MPI Error: " << get_mpi_error(rc) << "\n";
-        throw std::runtime_error("Failed to open " + volume_file);
-    }
-    for (size_t i = 0; i < n_chunks; ++i) {
-        const size_t chunk_thickness = brick.full_dims.z / n_chunks;
-        const vec3i chunk_offset(brick_read_offset.x,
-                                 brick_read_offset.y,
-                                 brick_read_offset.z + i * chunk_thickness);
-        vec3i chunk_dims = vec3i(brick.full_dims.x, brick.full_dims.y, chunk_thickness);
-        if (i * chunk_thickness + chunk_thickness >= brick.full_dims.z) {
-            chunk_dims.z = brick.full_dims.z - i * chunk_thickness;
-        }
-        const size_t byte_offset = i * chunk_thickness * brick.full_dims.y * brick.full_dims.x;
-        const int chunk_voxels = chunk_dims.long_product();
-
-        MPI_Datatype brick_type;
-        MPI_Type_create_subarray(3,
-                                 &volume_dims.x,
-                                 &chunk_dims.x,
-                                 &chunk_offset.x,
-                                 MPI_ORDER_FORTRAN,
-                                 voxel_type,
-                                 &brick_type);
-        MPI_Type_commit(&brick_type);
-
-        MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
-        rc = MPI_File_read_all(file_handle,
-                               brick.voxel_data->data() + byte_offset,
-                               chunk_voxels,
-                               voxel_type,
-                               MPI_STATUS_IGNORE);
-        if (rc != MPI_SUCCESS) {
-            std::cerr << "[error]: Failed to read all voxels from file. MPI Error: "
-                      << get_mpi_error(rc) << "\n";
-            throw std::runtime_error("Failed to read all voxels from file");
-        }
-        MPI_Type_free(&brick_type);
-    }
-    MPI_File_close(&file_handle);
+    brick.voxel_data = load_raw_volume(
+        volume_file, voxel_type, volume_dims, brick.full_dims, brick_read_offset);
 
     auto end = high_resolution_clock::now();
     if (mpi_rank == 0) {
@@ -191,15 +123,15 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     }
 
     cpp::Data osp_data;
-    if (voxel_type == MPI_UNSIGNED_CHAR) {
+    if (voxel_type == "uint8") {
         osp_data = cpp::Data(*brick.voxel_data, true);
-    } else if (voxel_type == MPI_UNSIGNED_SHORT) {
+    } else if (voxel_type == "uint16") {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<uint16_t *>(brick.voxel_data->data()), true);
-    } else if (voxel_type == MPI_FLOAT) {
+    } else if (voxel_type == "float32") {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<float *>(brick.voxel_data->data()), true);
-    } else if (voxel_type == MPI_DOUBLE) {
+    } else if (voxel_type == "float64") {
         osp_data =
             cpp::Data(n_voxels, reinterpret_cast<double *>(brick.voxel_data->data()), true);
     } else {
@@ -213,15 +145,15 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         start = high_resolution_clock::now();
 
         vec2f value_range;
-        if (voxel_type == MPI_UNSIGNED_CHAR) {
+        if (voxel_type == "uint8") {
             value_range = compute_value_range(brick.voxel_data->data(), n_voxels);
-        } else if (voxel_type == MPI_UNSIGNED_SHORT) {
+        } else if (voxel_type == "uint16") {
             value_range = compute_value_range(
                 reinterpret_cast<uint16_t *>(brick.voxel_data->data()), n_voxels);
-        } else if (voxel_type == MPI_FLOAT) {
+        } else if (voxel_type == "float32") {
             value_range = compute_value_range(
                 reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
-        } else if (voxel_type == MPI_DOUBLE) {
+        } else if (voxel_type == "float64") {
             value_range = compute_value_range(
                 reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
         } else {
@@ -311,34 +243,46 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 
 std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
                                                const VolumeBrick &brick,
-                                               const int mpi_rank)
+                                               const int mpi_rank,
+                                               const bool isosurface_full_volume)
 {
     using namespace std::chrono;
 
     std::vector<cpp::Geometry> isosurfaces;
 #ifdef VTK_FOUND
+    std::shared_ptr<std::vector<uint8_t>> voxel_data = brick.voxel_data;
+    vec3i brick_dims = brick.full_dims;
+
     const std::string voxel_type_string = config["type"].get<std::string>();
+    if (isosurface_full_volume) {
+        const std::string volume_file = config["volume"].get<std::string>();
+        const vec3i volume_dims = get_vec<int, 3>(config["size"]);
+        brick_dims = volume_dims;
+        voxel_data = load_raw_volume(
+            volume_file, voxel_type_string, volume_dims, volume_dims, vec3i(0));
+    }
+
     vtkSmartPointer<vtkDataArray> data_array = nullptr;
     if (voxel_type_string == "uint8") {
         auto arr = vtkSmartPointer<vtkUnsignedCharArray>::New();
-        arr->SetArray(brick.voxel_data->data(), brick.voxel_data->size(), 1);
+        arr->SetArray(voxel_data->data(), voxel_data->size(), 1);
         data_array = arr;
     } else if (voxel_type_string == "uint16") {
         auto arr = vtkSmartPointer<vtkUnsignedShortArray>::New();
-        arr->SetArray(reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(uint16_t),
+        arr->SetArray(reinterpret_cast<uint16_t *>(voxel_data->data()),
+                      voxel_data->size() / sizeof(uint16_t),
                       1);
         data_array = arr;
     } else if (voxel_type_string == "float32") {
         auto arr = vtkSmartPointer<vtkFloatArray>::New();
-        arr->SetArray(reinterpret_cast<float *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(float),
+        arr->SetArray(reinterpret_cast<float *>(voxel_data->data()),
+                      voxel_data->size() / sizeof(float),
                       1);
         data_array = arr;
     } else if (voxel_type_string == "float64") {
         auto arr = vtkSmartPointer<vtkDoubleArray>::New();
-        arr->SetArray(reinterpret_cast<double *>(brick.voxel_data->data()),
-                      brick.voxel_data->size() / sizeof(double),
+        arr->SetArray(reinterpret_cast<double *>(voxel_data->data()),
+                      voxel_data->size() / sizeof(double),
                       1);
         data_array = arr;
     } else {
@@ -347,8 +291,15 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
 
     const vec3f grid_spacing = get_vec<float, 3>(config["spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
-    img_data->SetDimensions(brick.full_dims.x, brick.full_dims.y, brick.full_dims.z);
+    img_data->SetDimensions(brick_dims.x, brick_dims.y, brick_dims.z);
     img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
+    // For whole volume iso we need to "untranslate" it so it's placed properly by the
+    // instance transform we'll apply later, since I didn't want to add a separate instance
+    if (isosurface_full_volume) {
+        img_data->SetOrigin(-brick.ghost_bounds.lower.x,
+                            -brick.ghost_bounds.lower.y,
+                            -brick.ghost_bounds.lower.z);
+    }
     img_data->GetPointData()->SetScalars(data_array);
 
     auto isovals = config["isovalue"].get<std::vector<float>>();
@@ -402,3 +353,81 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
     return isosurfaces;
 }
 
+std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
+                                                      const std::string &dtype,
+                                                      const vec3i &vol_dims,
+                                                      const vec3i &brick_dims,
+                                                      const vec3i &brick_offset)
+{
+    size_t voxel_size = 0;
+    MPI_Datatype voxel_type;
+    if (dtype == "uint8") {
+        voxel_type = MPI_UNSIGNED_CHAR;
+        voxel_size = 1;
+    } else if (dtype == "uint16") {
+        voxel_type = MPI_UNSIGNED_SHORT;
+        voxel_size = 2;
+    } else if (dtype == "float32") {
+        voxel_type = MPI_FLOAT;
+        voxel_size = 4;
+    } else if (dtype == "float64") {
+        voxel_type = MPI_DOUBLE;
+        voxel_size = 8;
+    } else {
+        throw std::runtime_error("Unrecognized voxel type " + dtype);
+    }
+
+    const size_t n_voxels = brick_dims.long_product();
+    auto voxel_data = std::make_shared<std::vector<uint8_t>>(n_voxels * voxel_size, 0);
+
+    // MPI still uses 32-bit signed ints for counts of objects, so we have to split reads
+    // of large data up so the count doesn't overflow. This assumes each X-Y slice is within
+    // that size limit and reads chunks
+    const size_t n_chunks = n_voxels / std::numeric_limits<int32_t>::max() +
+                            (n_voxels % std::numeric_limits<int32_t>::max() > 0 ? 1 : 0);
+
+    MPI_File file_handle;
+    auto rc = MPI_File_open(
+        MPI_COMM_WORLD, file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
+    if (rc != MPI_SUCCESS) {
+        std::cerr << "[error]: Failed to open file " << file
+                  << ". MPI Error: " << get_mpi_error(rc) << "\n";
+        throw std::runtime_error("Failed to open " + file);
+    }
+    for (size_t i = 0; i < n_chunks; ++i) {
+        const size_t chunk_thickness = brick_dims.z / n_chunks;
+        const vec3i chunk_offset(
+            brick_offset.x, brick_offset.y, brick_offset.z + i * chunk_thickness);
+        vec3i chunk_dims = vec3i(brick_dims.x, brick_dims.y, chunk_thickness);
+        if (i * chunk_thickness + chunk_thickness >= brick_dims.z) {
+            chunk_dims.z = brick_dims.z - i * chunk_thickness;
+        }
+        const size_t byte_offset = i * chunk_thickness * brick_dims.y * brick_dims.x;
+        const int chunk_voxels = chunk_dims.long_product();
+
+        MPI_Datatype brick_type;
+        MPI_Type_create_subarray(3,
+                                 &vol_dims.x,
+                                 &chunk_dims.x,
+                                 &chunk_offset.x,
+                                 MPI_ORDER_FORTRAN,
+                                 voxel_type,
+                                 &brick_type);
+        MPI_Type_commit(&brick_type);
+
+        MPI_File_set_view(file_handle, 0, voxel_type, brick_type, "native", MPI_INFO_NULL);
+        rc = MPI_File_read_all(file_handle,
+                               voxel_data->data() + byte_offset,
+                               chunk_voxels,
+                               voxel_type,
+                               MPI_STATUS_IGNORE);
+        if (rc != MPI_SUCCESS) {
+            std::cerr << "[error]: Failed to read all voxels from file. MPI Error: "
+                      << get_mpi_error(rc) << "\n";
+            throw std::runtime_error("Failed to read all voxels from file");
+        }
+        MPI_Type_free(&brick_type);
+    }
+    MPI_File_close(&file_handle);
+    return voxel_data;
+}
