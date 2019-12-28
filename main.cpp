@@ -187,21 +187,21 @@ void render_images(const std::vector<std::string> &args)
     }
 
     if (mpi_rank == 0) {
-        std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
+        std::cout << "Rendering Config: " << config.dump() << "\n" << std::flush;
     }
 
     // Connect to the simulation
     is::client::connect(server, port, MPI_COMM_WORLD);
     char hostname[HOST_NAME_MAX + 1] = {0};
     gethostname(hostname, HOST_NAME_MAX);
-    if (!detailed_cpu_stats) {
-        std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname << "\n";
-    } else {
+    if (detailed_cpu_stats) {
+        MPI_Barrier(MPI_COMM_WORLD);
         for (int i = 0; i < mpi_size; ++i) {
             if (i == mpi_rank) {
                 std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname
                           << "\n"
-                          << get_file_content("/proc/self/status") << "\n=========\n";
+                          << get_file_content("/proc/self/status") << "\n=========\n"
+                          << std::flush;
             }
             MPI_Barrier(MPI_COMM_WORLD);
         }
@@ -211,7 +211,11 @@ void render_images(const std::vector<std::string> &args)
 
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
-        material.setParam("Kd", get_vec<float, 3>(config["isosurface_color"]));
+        auto color = config["isosurface_color"].get<std::vector<float>>();
+        material.setParam("Kd", vec3f(color[0], color[1], color[2]));
+        if (color.size() == 4) {
+            material.setParam("d", color[3]);
+        }
     } else {
         material.setParam("Kd", vec3f(1.f));
     }
