@@ -9,10 +9,9 @@
         }
     ],
     "colormap": [
-        "ice_fire.png",
-        "paraview_cool_warm.png"
+        "ice_fire.png"
     ],
     "isovalue": [0.5],
     "isosurface_color": [0.2, 0.5, 1.0],
-    "background_color": [0, 0, 0]
+    "background_color": [1, 1, 1]
 }
