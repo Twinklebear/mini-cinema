@@ -160,19 +160,19 @@ void render_images(const std::vector<std::string> &args)
     }
 
     if (mpi_rank == 0) {
-        std::cout << "Rendering Config:\n" << config.dump(4) << "\n";
+        std::cout << "Rendering Config: " << config.dump() << "\n" << std::flush;
     }
 
     char hostname[HOST_NAME_MAX + 1] = {0};
     gethostname(hostname, HOST_NAME_MAX);
-    if (!detailed_cpu_stats) {
-        std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname << "\n";
-    } else {
+    if (detailed_cpu_stats) {
+        MPI_Barrier(MPI_COMM_WORLD);
         for (int i = 0; i < mpi_size; ++i) {
             if (i == mpi_rank) {
                 std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname
                           << "\n"
-                          << get_file_content("/proc/self/status") << "\n=========\n";
+                          << get_file_content("/proc/self/status") << "\n=========\n"
+                          << std::flush;
             }
             MPI_Barrier(MPI_COMM_WORLD);
         }
