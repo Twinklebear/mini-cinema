@@ -101,16 +101,19 @@ VolumeBrick load_volume_brick(json &config,
     const size_t n_voxels = brick.dims.long_product();
     cpp::Data osp_data;
     if (field.dataType == UINT8) {
-        osp_data =
-            cpp::Data(n_voxels, static_cast<const uint8_t *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             static_cast<const uint8_t *>(brick.voxel_data->data()),
+                             true);
         config["type"] = "uint8";
     } else if (field.dataType == FLOAT) {
-        osp_data =
-            cpp::Data(n_voxels, static_cast<const float *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             static_cast<const float *>(brick.voxel_data->data()),
+                             true);
         config["type"] = "float32";
     } else if (field.dataType == DOUBLE) {
-        osp_data =
-            cpp::Data(n_voxels, static_cast<const double *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             static_cast<const double *>(brick.voxel_data->data()),
+                             true);
         config["type"] = "float64";
     } else {
         std::cerr << "[error]: Unsupported voxel type\n";
