@@ -124,16 +124,19 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     cpp::Data osp_data;
     if (voxel_type == "uint8") {
-        osp_data = cpp::Data(*brick.voxel_data, true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims), brick.voxel_data->data(), true);
     } else if (voxel_type == "uint16") {
-        osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<uint16_t *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
+                             true);
     } else if (voxel_type == "float32") {
-        osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<float *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             reinterpret_cast<float *>(brick.voxel_data->data()),
+                             true);
     } else if (voxel_type == "float64") {
-        osp_data =
-            cpp::Data(n_voxels, reinterpret_cast<double *>(brick.voxel_data->data()), true);
+        osp_data = cpp::Data(vec3ul(brick.full_dims),
+                             reinterpret_cast<double *>(brick.voxel_data->data()),
+                             true);
     } else {
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
