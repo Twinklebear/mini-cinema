@@ -81,10 +81,10 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     brick.dims = volume_dims / grid;
 
-    const vec3f brick_lower = brick_id * brick.dims;
-    const vec3f brick_upper = brick_id * brick.dims + brick.dims;
+    const vec3i brick_lower = brick_id * brick.dims;
+    const vec3i brick_upper = brick_id * brick.dims + brick.dims;
 
-    brick.bounds = box3f(brick_lower, brick_upper);
+    brick.bounds = box3f(vec3f(brick_lower), vec3f(brick_upper));
 
     brick.full_dims = brick.dims;
     vec3i brick_read_offset = brick_lower;
@@ -386,26 +386,28 @@ std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
     // MPI still uses 32-bit signed ints for counts of objects, so we have to split reads
     // of large data up so the count doesn't overflow. This assumes each X-Y slice is within
     // that size limit and reads chunks
-    const size_t n_chunks = n_voxels / std::numeric_limits<int32_t>::max() +
-                            (n_voxels % std::numeric_limits<int32_t>::max() > 0 ? 1 : 0);
+    // It also seems like that size limit is based on bytes, not # of elements
+    const size_t elements_per_read = std::numeric_limits<int32_t>::max() / voxel_size;
+    const size_t n_chunks = n_voxels / elements_per_read +
+                            (n_voxels % elements_per_read > 0 ? 1 : 0);
+    const size_t chunk_thickness = brick_dims.z / n_chunks;
 
     MPI_File file_handle;
     auto rc = MPI_File_open(
         MPI_COMM_WORLD, file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
     if (rc != MPI_SUCCESS) {
         std::cerr << "[error]: Failed to open file " << file
-                  << ". MPI Error: " << get_mpi_error(rc) << "\n";
+                  << ". MPI Error: " << get_mpi_error(rc) << "\n" << std::flush;
         throw std::runtime_error("Failed to open " + file);
     }
     for (size_t i = 0; i < n_chunks; ++i) {
-        const size_t chunk_thickness = brick_dims.z / n_chunks;
         const vec3i chunk_offset(
             brick_offset.x, brick_offset.y, brick_offset.z + i * chunk_thickness);
         vec3i chunk_dims = vec3i(brick_dims.x, brick_dims.y, chunk_thickness);
         if (i * chunk_thickness + chunk_thickness >= brick_dims.z) {
             chunk_dims.z = brick_dims.z - i * chunk_thickness;
         }
-        const size_t byte_offset = i * chunk_thickness * brick_dims.y * brick_dims.x;
+        const size_t byte_offset = i * chunk_thickness * brick_dims.y * brick_dims.x * voxel_size;
         const int chunk_voxels = chunk_dims.long_product();
 
         MPI_Datatype brick_type;
