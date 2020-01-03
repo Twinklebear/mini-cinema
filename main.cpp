@@ -53,6 +53,9 @@ struct AsyncRender {
                 vec2i img_size,
                 std::string output_file);
 
+    AsyncRender(const AsyncRender &) = delete;
+    AsyncRender &operator=(const AsyncRender &) = delete;
+
     bool finished() const;
 
     void save_image() const;
@@ -84,7 +87,8 @@ void AsyncRender::save_image() const
 }
 
 void render_images(const std::vector<std::string> &args);
-void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks);
+void process_finished_renders(std::vector<std::shared_ptr<AsyncRender>> &renders,
+                              tbb::task_group &tasks);
 
 int main(int argc, char **argv)
 {
@@ -239,7 +243,7 @@ void render_images(const std::vector<std::string> &args)
 
     ProfilingPoint start;
     tbb::task_group tasks;
-    std::vector<AsyncRender> active_renders;
+    std::vector<std::shared_ptr<AsyncRender>> active_renders;
     for (size_t k = 0; k < std::max(isosurfaces.size(), size_t(1)); ++k) {
         cpp::GeometricModel geom_model;
         if (!isosurfaces.empty()) {
@@ -287,7 +291,8 @@ void render_images(const std::vector<std::string> &args)
                 std::sprintf(&fmt_out_buf[0], fmt_string.c_str(), static_cast<int>(i));
                 fname += "-tfn" + std::to_string(j) + "-cam" + fmt_out_buf + ".jpg";
 
-                active_renders.emplace_back(renderer, camera, world, img_size, fname);
+                active_renders.push_back(
+                    std::make_shared<AsyncRender>(renderer, camera, world, img_size, fname));
                 process_finished_renders(active_renders, tasks);
 
                 while (active_renders.size() >= frames_in_flight) {
@@ -324,16 +329,19 @@ void render_images(const std::vector<std::string> &args)
     }
 }
 
-void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks)
+void process_finished_renders(std::vector<std::shared_ptr<AsyncRender>> &renders,
+                              tbb::task_group &tasks)
 {
     auto done = std::stable_partition(
-        renders.begin(), renders.end(), [](const AsyncRender &a) { return !a.finished(); });
+        renders.begin(), renders.end(), [](const std::shared_ptr<AsyncRender> &a) {
+            return !a->finished();
+        });
 
     if (save_images) {
         for (auto it = done; it != renders.end(); ++it) {
-            AsyncRender r = *it;
+            auto r = *it;
             if (mpi_rank == 0) {
-                tasks.run([r]() { r.save_image(); });
+                tasks.run([r]() { r->save_image(); });
             }
         }
     }
