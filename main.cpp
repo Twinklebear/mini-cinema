@@ -57,6 +57,9 @@ struct AsyncRender {
                 vec2i img_size,
                 std::string output_file);
 
+    AsyncRender(const AsyncRender &) = delete;
+    AsyncRender &operator=(const AsyncRender &) = delete;
+
     bool finished() const;
 
     void save_image() const;
@@ -88,7 +91,8 @@ void AsyncRender::save_image() const
 }
 
 void render_images(const std::vector<std::string> &args);
-void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks);
+void process_finished_renders(std::vector<std::shared_ptr<AsyncRender>> &renders,
+                              tbb::task_group &tasks);
 
 int main(int argc, char **argv)
 {
@@ -308,7 +312,7 @@ void render_images(const std::vector<std::string> &args)
         }
 
         tbb::task_group tasks;
-        std::vector<AsyncRender> active_renders;
+        std::vector<std::shared_ptr<AsyncRender>> active_renders;
         for (size_t k = 0; k < std::max(num_isovalues, size_t(1)); ++k) {
             for (size_t j = 0; j < colormaps.size(); ++j) {
                 std::vector<cpp::Instance> instances;
@@ -361,7 +365,8 @@ void render_images(const std::vector<std::string> &args)
                     fname += "-tfn" + std::to_string(j) + "-cam" + std::to_string(i) + "-df" +
                              fmt_out_buf + ".jpg";
 
-                    active_renders.emplace_back(renderer, camera, world, img_size, fname);
+                    active_renders.push_back(std::make_shared<AsyncRender>(
+                        renderer, camera, world, img_size, fname));
                     process_finished_renders(active_renders, tasks);
 
                     while (active_renders.size() >= frames_in_flight) {
@@ -391,16 +396,19 @@ void render_images(const std::vector<std::string> &args)
     is::client::disconnect();
 }
 
-void process_finished_renders(std::vector<AsyncRender> &renders, tbb::task_group &tasks)
+void process_finished_renders(std::vector<std::shared_ptr<AsyncRender>> &renders,
+                              tbb::task_group &tasks)
 {
     auto done = std::stable_partition(
-        renders.begin(), renders.end(), [](const AsyncRender &a) { return !a.finished(); });
+        renders.begin(), renders.end(), [](const std::shared_ptr<AsyncRender> &a) {
+            return !a->finished();
+        });
 
     if (save_images) {
         for (auto it = done; it != renders.end(); ++it) {
-            AsyncRender r = *it;
+            auto r = *it;
             if (mpi_rank == 0) {
-                tasks.run([r]() { r.save_image(); });
+                tasks.run([r]() { r->save_image(); });
             }
         }
     }
