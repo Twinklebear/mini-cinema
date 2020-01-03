@@ -251,7 +251,7 @@ void render_images(const std::vector<std::string> &args)
         }
         // Query the data from the simulation
         auto regions = is::client::query();
-        std::cout << "Rank " << mpi_rank << " received " << regions.size() << "regions\n";
+        std::cout << "Rank " << mpi_rank << " received " << regions.size() << " regions\n";
 
         auto start = high_resolution_clock::now();
         if (mpi_rank == 0) {

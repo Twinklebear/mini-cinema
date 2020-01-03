@@ -1,8 +1,7 @@
 {
     "field": "field_one",
-    "spacing": [1, 1, 1],
     "image_size": [512, 512],
-    "spp": 2,
+    "spp": 4,
     "camera": [
         {
             "orbit": 4
