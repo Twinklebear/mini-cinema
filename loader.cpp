@@ -356,14 +356,11 @@ std::vector<ParticleBrick> load_particle_bricks(const std::vector<is::SimState> 
         if (r.particles.numParticles > 0) {
             LAMMPSParticle *particles =
                 reinterpret_cast<LAMMPSParticle *>(r.particles.array->data());
-            auto minmax = parallel_minmax_element(particles, r.particles.numParticles);
-
+            auto minmax = std::minmax_element(particles, particles + r.particles.numParticles);
             attrib_range.x = std::min(attrib_range.x, static_cast<float>(minmax.first->type));
             attrib_range.y = std::max(attrib_range.y, static_cast<float>(minmax.second->type));
         }
     }
-    int rank = 0;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     vec2f global_range;
     MPI_Allreduce(&attrib_range.x, &global_range.x, 1, MPI_FLOAT, MPI_MIN, MPI_COMM_WORLD);
