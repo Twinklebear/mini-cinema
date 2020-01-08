@@ -1,0 +1,15 @@
+{
+    "image_size": [1024, 1024],
+    "spp": 4,
+    "particle_radius": 1,
+    "ao": 1,
+    "camera": [
+        {
+            "orbit": 125
+        }
+    ],
+    "colormap": [
+        "ice_fire.png"
+    ],
+    "background_color": [1, 1, 1]
+}
