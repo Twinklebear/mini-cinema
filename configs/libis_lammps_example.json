@@ -1,6 +1,6 @@
 {
     "image_size": [512, 512],
-    "spp": 16,
+    "spp": 4,
     "particle_radius": 1,
     "ao": 1,
     "camera": [
