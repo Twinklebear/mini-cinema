@@ -34,6 +34,22 @@ struct VolumeBrick {
     std::shared_ptr<is::Array> voxel_data;
 };
 
+struct ParticleBrick {
+    // Particle geometry
+    cpp::Geometry geom;
+
+    size_t num_particles;
+    // bounds of the owned portion of the particles
+    box3f bounds;
+    // full bounds of the owned portion + ghost zones
+    box3f ghost_bounds;
+    // The particle data array
+    std::shared_ptr<is::Array> data;
+
+    ParticleBrick() = default;
+    ParticleBrick(const is::SimState &region);
+};
+
 struct Camera {
     vec3f pos;
     vec3f dir;
@@ -73,7 +89,15 @@ std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
 std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string> &files,
                                                   const vec2f &value_range);
 
+// Load an RGB8 texture
+cpp::Texture load_texture(const std::string &file);
+
 std::vector<Isosurface> extract_isosurfaces(const json &config,
                                             const VolumeBrick &brick,
                                             const int mpi_rank,
                                             const vec2f &value_range);
+
+// Load the set of particle bricks for the regions. Returns an empty vector if
+// no particles in any region
+std::vector<ParticleBrick> load_particle_bricks(const std::vector<is::SimState> &regions,
+                                                const float radius);

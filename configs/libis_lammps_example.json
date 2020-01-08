@@ -1,8 +1,8 @@
 {
-    "field": "field_one",
     "image_size": [512, 512],
-    "spp": 4,
-    "particle_radius": 0.01,
+    "spp": 16,
+    "particle_radius": 1,
+    "ao": 1,
     "camera": [
         {
             "orbit": 4
@@ -11,7 +11,5 @@
     "colormap": [
         "ice_fire.png"
     ],
-    "isovalue": [0.5],
-    "isosurface_color": [0.2, 0.5, 1.0],
     "background_color": [1, 1, 1]
 }

@@ -173,7 +173,6 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 {
     std::vector<cpp::TransferFunction> colormaps;
     for (const auto &f : files) {
-        cpp::TransferFunction tfn("piecewise_linear");
         int x, y, n;
         uint8_t *data = stbi_load(f.c_str(), &x, &y, &n, 4);
         if (!data) {
@@ -195,7 +194,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         }
         stbi_image_free(data);
 
-        std::cout << "value range: " << value_range << "\n";
+        cpp::TransferFunction tfn("piecewise_linear");
         tfn.setParam("color", cpp::Data(colors));
         tfn.setParam("opacity", cpp::Data(opacities));
         tfn.setParam("valueRange", value_range);
@@ -203,6 +202,24 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         colormaps.push_back(tfn);
     }
     return colormaps;
+}
+
+cpp::Texture load_texture(const std::string &file)
+{
+    int x, y, n;
+    uint8_t *data = stbi_load(file.c_str(), &x, &y, &n, 3);
+    if (!data) {
+        std::cerr << "[error]: failed to load image: " << file << "\n" << std::flush;
+        throw std::runtime_error("Failed to load " + file);
+    }
+
+    cpp::Texture tex("texture2d");
+    tex.setParam("format", static_cast<int>(OSP_TEXTURE_RGB8));
+    tex.setParam("data", cpp::Data(vec2ul(x, y), reinterpret_cast<vec3uc *>(data)));
+    tex.commit();
+
+    stbi_image_free(data);
+    return tex;
 }
 
 std::vector<Isosurface> extract_isosurfaces(const json &config,
@@ -304,3 +321,123 @@ std::vector<Isosurface> extract_isosurfaces(const json &config,
     return isosurfaces;
 }
 
+// The layout used by the libIS lammps example
+struct LAMMPSParticle {
+    float x, y, z;
+    int type;
+};
+
+bool operator<(const LAMMPSParticle &a, const LAMMPSParticle &b)
+{
+    return a.type < b.type;
+}
+
+ParticleBrick::ParticleBrick(const is::SimState &region)
+    : geom("spheres"),
+      num_particles(region.particles.numParticles),
+      bounds(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
+             vec3f(region.local.max.x, region.local.max.y, region.local.max.z)),
+      ghost_bounds(vec3f(region.ghost.min.x, region.ghost.min.y, region.ghost.min.z),
+                   vec3f(region.ghost.max.x, region.ghost.max.y, region.ghost.max.z)),
+      data(region.particles.array)
+{
+}
+
+std::vector<ParticleBrick> load_particle_bricks(const std::vector<is::SimState> &regions,
+                                                const float radius)
+{
+    std::vector<ParticleBrick> bricks;
+
+    // First compute the global value range so we can compute the texture coordinates to use
+    // to colormap the particles
+    vec2f attrib_range(std::numeric_limits<float>::infinity(),
+                       -std::numeric_limits<float>::infinity());
+    for (const auto &r : regions) {
+        if (r.particles.numParticles > 0) {
+            LAMMPSParticle *particles =
+                reinterpret_cast<LAMMPSParticle *>(r.particles.array->data());
+            auto minmax = parallel_minmax_element(particles, r.particles.numParticles);
+
+            attrib_range.x = std::min(attrib_range.x, static_cast<float>(minmax.first->type));
+            attrib_range.y = std::max(attrib_range.y, static_cast<float>(minmax.second->type));
+        }
+    }
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    vec2f global_range;
+    MPI_Allreduce(&attrib_range.x, &global_range.x, 1, MPI_FLOAT, MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(&attrib_range.y, &global_range.y, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
+
+    if (std::isinf(attrib_range.x)) {
+        return bricks;
+    }
+
+    for (const auto &r : regions) {
+        if (r.particles.numParticles > 0) {
+            ParticleBrick brick(r);
+
+            LAMMPSParticle *particles = reinterpret_cast<LAMMPSParticle *>(brick.data->data());
+            if (r.particles.numGhost > 0) {
+                // Find the ghost particles which are from other ranks, and filter out those
+                // from the periodic boundary condition
+                auto ghostParticlesEnd =
+                    std::partition(particles + r.particles.numParticles,
+                                   particles + r.particles.numParticles + r.particles.numGhost,
+                                   [&](const LAMMPSParticle &p) {
+                                       return p.x >= r.world.min.x && p.y >= r.world.min.y &&
+                                              p.z >= r.world.min.z && p.x <= r.world.max.x &&
+                                              p.y <= r.world.max.y && p.z <= r.world.max.z;
+                                   });
+                size_t num_ghost_particles =
+                    std::distance(particles + r.particles.numParticles, ghostParticlesEnd);
+                brick.num_particles += num_ghost_particles;
+            }
+
+            cpp::Data positions_data(brick.num_particles,
+                                     sizeof(LAMMPSParticle),
+                                     reinterpret_cast<vec3f *>(particles),
+                                     true);
+
+            // Generate texture coordinate data for colormapping
+            std::vector<vec2f> texcoords;
+            texcoords.reserve(brick.num_particles);
+            for (size_t i = 0; i < brick.num_particles; ++i) {
+                float t = 0.5f;
+                if (global_range.x != global_range.y) {
+                    t = (particles[i].type - global_range.x) /
+                        (global_range.y - global_range.x);
+                }
+                texcoords.emplace_back(t, 0.5f);
+            }
+
+            if (r.particles.numGhost > 0) {
+                if (brick.bounds.lower.x == r.world.min.x) {
+                    brick.bounds.lower.x -= radius;
+                }
+                if (brick.bounds.lower.y == r.world.min.y) {
+                    brick.bounds.lower.y -= radius;
+                }
+                if (brick.bounds.lower.z == r.world.min.z) {
+                    brick.bounds.lower.z -= radius;
+                }
+                if (brick.bounds.upper.x == r.world.max.x) {
+                    brick.bounds.upper.x += radius;
+                }
+                if (brick.bounds.upper.y == r.world.max.y) {
+                    brick.bounds.upper.y += radius;
+                }
+                if (brick.bounds.upper.z == r.world.max.z) {
+                    brick.bounds.upper.z += radius;
+                }
+            }
+
+            brick.geom.setParam("sphere.position", positions_data);
+            brick.geom.setParam("sphere.texcoord", cpp::Data(texcoords));
+            brick.geom.setParam("radius", radius);
+            brick.geom.commit();
+            bricks.push_back(brick);
+        }
+    }
+    return bricks;
+}

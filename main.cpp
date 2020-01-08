@@ -190,6 +190,11 @@ void render_images(const std::vector<std::string> &args)
         throw std::runtime_error("Missing server or port arguments");
     }
 
+    if (config.type() == json::value_t::null) {
+        std::cerr << "[error]: A configuration JSON file must be provided\n";
+        throw std::runtime_error("No config file provided");
+    }
+
     if (mpi_rank == 0) {
         std::cout << "Rendering Config: " << config.dump() << "\n" << std::flush;
     }
@@ -212,6 +217,10 @@ void render_images(const std::vector<std::string> &args)
     }
 
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
+    float particle_radius = 1.f;
+    if (config.find("particle_radius") != config.end()) {
+        particle_radius = config["particle_radius"].get<float>();
+    }
 
     cpp::Material material("scivis", "default");
     if (config.find("isosurface_color") != config.end()) {
@@ -224,6 +233,14 @@ void render_images(const std::vector<std::string> &args)
         material.setParam("Kd", vec3f(1.f));
     }
     material.commit();
+
+    cpp::Material particle_mat("scivis", "default");
+    {
+        auto texture = load_texture(config["colormap"][0].get<std::string>());
+        particle_mat.setParam("Kd", vec3f(1.f));
+        particle_mat.setParam("map_Kd", texture);
+        particle_mat.commit();
+    }
 
     // create and setup an ambient light
     cpp::Light ambient_light("ambient");
@@ -238,6 +255,9 @@ void render_images(const std::vector<std::string> &args)
     }
     if (config.find("spp") != config.end()) {
         renderer.setParam("spp", config["spp"].get<int>());
+    }
+    if (config.find("ao") != config.end()) {
+        renderer.setParam("aoSamples", config["ao"].get<int>());
     }
     renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
@@ -258,17 +278,30 @@ void render_images(const std::vector<std::string> &args)
             std::cout << "Beginning rendering\n";
         }
 
-        // TODO: support for multiple regions, we'll need to pass the regions param to
-        // the world.
         std::vector<VolumeBrick> bricks;
         for (auto &region : regions) {
-            bricks.push_back(load_volume_brick(config, region, mpi_rank, mpi_size));
+            if (config.find("field") != config.end()) {
+                const std::string field_name = config["field"].get<std::string>();
+                if (region.fields.find(field_name) != region.fields.end()) {
+                    bricks.push_back(load_volume_brick(config, region, mpi_rank, mpi_size));
+                }
+            }
         }
+
+        auto particle_bricks = load_particle_bricks(regions, particle_radius);
+        std::vector<cpp::GeometricModel> particle_models;
+        for (auto &pb : particle_bricks) {
+            cpp::GeometricModel gm(pb.geom);
+            gm.setParam("material", particle_mat);
+            gm.commit();
+            particle_models.push_back(gm);
+        }
+
         world_bounds = box3f(
             vec3f(regions[0].world.min.x, regions[0].world.min.y, regions[0].world.min.z),
             vec3f(regions[0].world.max.x, regions[0].world.max.y, regions[0].world.max.z));
 
-        if (config.find("value_range") == config.end()) {
+        if (!bricks.empty() && config.find("value_range") == config.end()) {
             vec2f local_value_range = bricks[0].value_range;
             for (size_t i = 1; i < bricks.size(); ++i) {
                 local_value_range.x = std::min(bricks[i].value_range.x, local_value_range.x);
@@ -295,26 +328,33 @@ void render_images(const std::vector<std::string> &args)
             config["value_range"] = {global_value_range.x, global_value_range.y};
         }
 
-        const vec2f value_range = get_vec<float, 2>(config["value_range"]);
-        const auto colormaps =
-            load_colormaps(config["colormap"].get<std::vector<std::string>>(), value_range);
-        const auto camera_set =
-            load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
-        // We don't use the implicit isosurfaces geometry because I want to test
-        // on non-volume objects, e.g. explicit triangle surfaces
         std::vector<std::vector<Isosurface>> isosurfaces;
+        std::vector<cpp::TransferFunction> colormaps;
         size_t num_isovalues = 0;
-        if (config.find("isovalue") != config.end()) {
-            num_isovalues = config["isovalue"].size();
-            for (const auto &b : bricks) {
-                isosurfaces.push_back(extract_isosurfaces(config, b, mpi_rank, value_range));
+        vec2f value_range;
+        if (config.find("value_range") != config.end()) {
+            value_range = get_vec<float, 2>(config["value_range"]);
+            colormaps = load_colormaps(config["colormap"].get<std::vector<std::string>>(),
+                                       value_range);
+
+            // We don't use the implicit isosurfaces geometry because I want to test
+            // on non-volume objects, e.g. explicit triangle surfaces
+            if (config.find("isovalue") != config.end()) {
+                num_isovalues = config["isovalue"].size();
+                for (const auto &b : bricks) {
+                    isosurfaces.push_back(
+                        extract_isosurfaces(config, b, mpi_rank, value_range));
+                }
             }
         }
+
+        const auto camera_set =
+            load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
 
         tbb::task_group tasks;
         std::vector<std::shared_ptr<AsyncRender>> active_renders;
         for (size_t k = 0; k < std::max(num_isovalues, size_t(1)); ++k) {
-            for (size_t j = 0; j < colormaps.size(); ++j) {
+            for (size_t j = 0; j < std::max(colormaps.size(), size_t(1)); ++j) {
                 std::vector<cpp::Instance> instances;
                 std::vector<box3f> region_bounds;
                 for (size_t rid = 0; rid < bricks.size(); ++rid) {
@@ -342,6 +382,27 @@ void render_images(const std::vector<std::string> &args)
                     instance.commit();
                     instances.push_back(instance);
                     region_bounds.push_back(b.bounds);
+                }
+
+                // The particle positions from the lammps example are global, so we dump
+                // them all in a single group and instance together
+                if (!particle_models.empty()) {
+                    cpp::Group group;
+                    group.setParam("geometry", cpp::Data(particle_models));
+                    group.commit();
+
+                    cpp::Instance instance(group);
+                    instance.commit();
+                    instances.push_back(instance);
+
+                    // If there's no volume bricks these particles implicitly live in, specify
+                    // the bounds of each particle brick
+                    if (bricks.size() == 0) {
+                        std::transform(particle_bricks.begin(),
+                                       particle_bricks.end(),
+                                       std::back_inserter(region_bounds),
+                                       [](const ParticleBrick &pb) { return pb.bounds; });
+                    }
                 }
 
                 cpp::World world;
