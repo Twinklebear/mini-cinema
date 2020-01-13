@@ -74,7 +74,7 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     const std::string volume_file = config["volume"].get<std::string>();
     const vec3i volume_dims = get_vec<int, 3>(config["size"]);
-    const vec3f spacing = get_vec<int, 3>(config["spacing"]);
+    const vec3f spacing = get_vec<float, 3>(config["spacing"]);
     const vec3i grid = compute_grid(mpi_size);
     const vec3i brick_id(
         mpi_rank % grid.x, (mpi_rank / grid.x) % grid.y, mpi_rank / (grid.x * grid.y));
@@ -84,7 +84,7 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     const vec3i brick_lower = brick_id * brick.dims;
     const vec3i brick_upper = brick_id * brick.dims + brick.dims;
 
-    brick.bounds = box3f(vec3f(brick_lower), vec3f(brick_upper));
+    brick.bounds = box3f(vec3f(brick_lower) * spacing, vec3f(brick_upper) * spacing);
 
     brick.full_dims = brick.dims;
     vec3i brick_read_offset = brick_lower;

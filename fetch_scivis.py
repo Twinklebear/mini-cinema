@@ -23,7 +23,9 @@ meta["volume"] = os.path.normpath(work_path + "/" + os.path.basename(volume_path
 meta["spp"] = 1
 meta["camera"] = [
         {
-            "pos": [meta["size"][0] / 2, meta["size"][1] / 2, -meta["size"][2]],
+            "pos": [meta["size"][0] / 2 * meta["spacing"][0],
+                    meta["size"][1] / 2 * meta["spacing"][1],
+                    -meta["size"][2] * meta["spacing"][2]],
             "dir": [0, 0, 1],
             "up": [0, 1, 0]
         },
