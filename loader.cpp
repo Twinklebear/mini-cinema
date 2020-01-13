@@ -388,8 +388,8 @@ std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
     // that size limit and reads chunks
     // It also seems like that size limit is based on bytes, not # of elements
     const size_t elements_per_read = std::numeric_limits<int32_t>::max() / voxel_size;
-    const size_t n_chunks = n_voxels / elements_per_read +
-                            (n_voxels % elements_per_read > 0 ? 1 : 0);
+    const size_t n_chunks =
+        n_voxels / elements_per_read + (n_voxels % elements_per_read > 0 ? 1 : 0);
     const size_t chunk_thickness = brick_dims.z / n_chunks;
 
     MPI_File file_handle;
@@ -397,7 +397,8 @@ std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
         MPI_COMM_WORLD, file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &file_handle);
     if (rc != MPI_SUCCESS) {
         std::cerr << "[error]: Failed to open file " << file
-                  << ". MPI Error: " << get_mpi_error(rc) << "\n" << std::flush;
+                  << ". MPI Error: " << get_mpi_error(rc) << "\n"
+                  << std::flush;
         throw std::runtime_error("Failed to open " + file);
     }
     for (size_t i = 0; i < n_chunks; ++i) {
@@ -407,7 +408,8 @@ std::shared_ptr<std::vector<uint8_t>> load_raw_volume(const std::string &file,
         if (i * chunk_thickness + chunk_thickness >= brick_dims.z) {
             chunk_dims.z = brick_dims.z - i * chunk_thickness;
         }
-        const size_t byte_offset = i * chunk_thickness * brick_dims.y * brick_dims.x * voxel_size;
+        const size_t byte_offset = i * size_t(chunk_thickness) * size_t(brick_dims.y) *
+                                   size_t(brick_dims.x) * voxel_size;
         const int chunk_voxels = chunk_dims.long_product();
 
         MPI_Datatype brick_type;
