@@ -126,7 +126,7 @@ int main(int argc, char **argv)
     }
 
     ospShutdown();
-    MPI_Finalize();
+    //MPI_Finalize();
     return 0;
 }
 
