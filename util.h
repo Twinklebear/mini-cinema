@@ -25,6 +25,30 @@ std::string get_mpi_error(const int error_code);
 
 std::vector<vec3f> generate_fibonacci_sphere(const size_t n_points, const float radius);
 
+template <typename T>
+void memcpy3d(T *dst,
+              const T *src,
+              const vec3i &src_offset,
+              const vec3i &dst_offset,
+              const vec3i &size,
+              const vec3i &src_dims,
+              const vec3i &dst_dims)
+{
+    for (int z = 0; z < size.z; ++z) {
+        for (int y = 0; y < size.y; ++y) {
+            for (int x = 0; x < size.x; ++x) {
+                const size_t read_offset =
+                    ((src_offset.z + z) * src_dims.y + src_offset.y + y) * src_dims.x +
+                    src_offset.x + x;
+                const size_t write_offset =
+                    ((dst_offset.z + z) * dst_dims.y + dst_offset.y + y) * dst_dims.x +
+                    dst_offset.x + x;
+                std::memcpy(dst + write_offset, src + read_offset, sizeof(T) * size.x);
+            }
+        }
+    }
+}
+
 template <typename T, size_t N>
 inline vec_t<T, N> get_vec(const json &j)
 {

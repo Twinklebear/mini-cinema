@@ -5,9 +5,9 @@
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
 #include "json.hpp"
+#include "simgrid.h"
 #include "stb_image.h"
 #include "util.h"
-#include "simgrid.h"
 
 #ifdef VTK_FOUND
 #include <vtkDoubleArray.h>
@@ -22,11 +22,6 @@
 #endif
 
 #include "loader.h"
-
-Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
-    : pos(pos), dir(dir), up(up)
-{
-}
 
 bool compute_divisor(int x, int &divisor)
 {
@@ -55,9 +50,10 @@ vec3i compute_grid(int num)
     }
     return grid;
 }
-std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
+
+vec3i compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
 {
-    std::array<int, 3> faces = {NEITHER_FACE, NEITHER_FACE, NEITHER_FACE};
+    vec3i faces(NEITHER_FACE);
     for (size_t i = 0; i < 3; ++i) {
         if (brick_id[i] < grid[i] - 1) {
             faces[i] |= POS_FACE;
@@ -69,96 +65,322 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
     return faces;
 }
 
-std::vector<VolumeBrick> load_volume_bricks(json &config,
-                              const std::vector<is::SimState> &regions,
-                              const int mpi_rank,
-                              const int mpi_size)
+Camera::Camera(const vec3f &pos, const vec3f &dir, const vec3f &up)
+    : pos(pos), dir(dir), up(up)
 {
-    std::vector<VolumeBrick> bricks;
-    SimGrid sim_grid = reconstruct_grid(regions, mpi_rank, mpi_size);
-    std::cout << sim_grid << "\n";
-
-    return bricks;
 }
 
-
-VolumeBrick load_volume_brick(json &config,
-                              const is::SimState &region,
-                              const int mpi_rank,
-                              const int mpi_size)
+void memcpy3d_field(uint8_t *dst, const is::Field &field, const vec3i &start, const vec3i &end)
 {
-    using namespace std::chrono;
-    VolumeBrick brick;
+    const vec3i dst_dims = end - start;
+    const vec3i src_dims(field.dims[0], field.dims[1], field.dims[2]);
+    std::cout << "dst dims: " << dst_dims << "\n";
+    switch (field.dataType) {
+    case UINT8:
+        memcpy3d(dst,
+                 reinterpret_cast<uint8_t *>(field.array->data()),
+                 start,
+                 vec3i(0),
+                 dst_dims,
+                 src_dims,
+                 dst_dims);
+        break;
+    case FLOAT:
+        memcpy3d(reinterpret_cast<float *>(dst),
+                 reinterpret_cast<float *>(field.array->data()),
+                 start,
+                 vec3i(0),
+                 dst_dims,
+                 src_dims,
+                 dst_dims);
+        break;
+    case DOUBLE:
+        memcpy3d(reinterpret_cast<double *>(dst),
+                 reinterpret_cast<double *>(field.array->data()),
+                 start,
+                 vec3i(0),
+                 dst_dims,
+                 src_dims,
+                 dst_dims);
+        break;
+    default:
+        throw std::runtime_error("Invalid field data type");
+    }
+}
 
+void memcpy3d(void *dst,
+              const void *src,
+              const vec3i &src_offset,
+              const vec3i &dst_offset,
+              const vec3i &size,
+              const vec3i &src_dims,
+              const vec3i &dst_dims,
+              const libISDType type)
+{
+    switch (type) {
+    case UINT8:
+        memcpy3d(reinterpret_cast<uint8_t *>(dst),
+                 reinterpret_cast<const uint8_t *>(src),
+                 src_offset,
+                 dst_offset,
+                 size,
+                 src_dims,
+                 dst_dims);
+        break;
+    case FLOAT:
+        memcpy3d(reinterpret_cast<float *>(dst),
+                 reinterpret_cast<const float *>(src),
+                 src_offset,
+                 dst_offset,
+                 size,
+                 src_dims,
+                 dst_dims);
+        break;
+    case DOUBLE:
+        memcpy3d(reinterpret_cast<double *>(dst),
+                 reinterpret_cast<const double *>(src),
+                 src_offset,
+                 dst_offset,
+                 size,
+                 src_dims,
+                 dst_dims);
+        break;
+    default:
+        throw std::runtime_error("Invalid field data type");
+    }
+}
+
+GhostData::GhostData(const vec3i &brick_id, const vec3i &grid, const is::Field &field)
+    : ghost_faces(compute_ghost_faces(brick_id, grid))
+{
+    for (int i = 0; i < 3; ++i) {
+        if (ghost_faces[i] != NEITHER_FACE) {
+            std::array<uint64_t, 3> dims;
+            dims[i] = 1;
+            dims[(i + 1) % 3] = field.dims[(i + 1) % 3];
+            dims[(i + 2) % 3] = field.dims[(i + 2) % 3];
+
+            std::cout << "face " << i << " for field " << field.dims[0] << "x" << field.dims[1]
+                      << "x" << field.dims[2] << " has dimensions: " << dims[0] << "x"
+                      << dims[1] << "x" << dims[2] << "\n";
+
+            const size_t face_bytes = dims[0] * dims[1] * dims[2] * field.array->stride();
+            std::cout << "face bytes: " << face_bytes << "\n";
+            if (ghost_faces[i] & NEG_FACE) {
+                std::cout << "face " << i << " neg face\n";
+                faces[i * 2] = std::make_shared<std::vector<uint8_t>>(face_bytes, 0);
+
+                vec3i end(dims[0], dims[1], dims[2]);
+                std::cout << "start = " << vec3i(0) << ", end = " << end << "\n";
+                memcpy3d_field(faces[i * 2]->data(), field, vec3i(0), end);
+            }
+            if (ghost_faces[i] & POS_FACE) {
+                std::cout << "face " << i << " pos face\n";
+                faces[i * 2 + 1] = std::make_shared<std::vector<uint8_t>>(face_bytes, 0);
+
+                vec3i start(0);
+                start[i] = field.dims[i] - 1;
+
+                vec3i end(dims[0], dims[1], dims[2]);
+                end[i] = field.dims[i];
+
+                std::cout << "start = " << start << ", end = " << end << "\n";
+                memcpy3d_field(faces[i * 2 + 1]->data(), field, start, end);
+            }
+        }
+    }
+}
+
+std::vector<VolumeBrick> load_volume_bricks(json &config,
+                                            const std::vector<is::SimState> &regions,
+                                            const int mpi_rank,
+                                            const int mpi_size)
+{
     const std::string field_name = config["field"].get<std::string>();
-    const auto it = region.fields.find(field_name);
-    if (it == region.fields.end()) {
-        std::cerr << "[error]: Requested field " << field_name
-                  << " was not found in the simulation\n";
-        throw std::runtime_error("[error]: Field not found");
+    SimGrid sim_grid = reconstruct_grid(regions, mpi_rank, mpi_size);
+
+    std::cout << sim_grid << "\n";
+
+    std::vector<GhostData> send_ghost_data;
+    std::vector<GhostData> recv_ghost_data;
+    std::vector<MPI_Request> requests;
+    for (size_t i = 0; i < regions.size(); ++i) {
+        const auto &region = regions[i];
+        const auto it = region.fields.find(field_name);
+        if (it == region.fields.end()) {
+            std::cerr << "[error]: Requested field " << field_name
+                      << " was not found in the simulation\n";
+            throw std::runtime_error("[error]: Field not found");
+        }
+
+        const box3f region_bounds =
+            box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
+                  vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
+
+        const is::Field &field = it->second;
+        const SimBrick &sim_brick = sim_grid.brick_at(region_bounds);
+
+        GhostData sendg(sim_brick.id, sim_grid.grid, field);
+
+        GhostData recvg;
+        recvg.ghost_faces = sendg.ghost_faces;
+        for (size_t j = 0; j < sendg.faces.size(); ++j) {
+            if (!sendg.faces[j]) {
+                continue;
+            }
+
+            recvg.faces[j] = std::make_shared<std::vector<uint8_t>>(sendg.faces[j]->size(), 0);
+
+            // Find the rank which we need to exchange data with for this face
+            vec3i neighbor_dir(0);
+            if (j < 2) {
+                neighbor_dir.x = j == 0 ? -1 : 1;
+            } else if (j < 4) {
+                neighbor_dir.y = j == 2 ? -1 : 1;
+            } else {
+                neighbor_dir.z = j == 4 ? -1 : 1;
+            }
+
+            const vec3i neighbor_id = sim_brick.id + neighbor_dir;
+            const int neighbor_rank = sim_grid.brick_owner(neighbor_id);
+            std::cout << "brick " << sim_brick.id << ", ghost face " << j << " neighbor dir "
+                      << neighbor_dir << ", neighbor id = " << neighbor_id << "\n";
+
+            MPI_Request recv_req;
+            MPI_Irecv(recvg.faces[j]->data(),
+                      recvg.faces[j]->size(),
+                      MPI_BYTE,
+                      neighbor_rank,
+                      0,
+                      MPI_COMM_WORLD,
+                      &recv_req);
+
+            MPI_Request send_req;
+            MPI_Isend(sendg.faces[j]->data(),
+                      sendg.faces[j]->size(),
+                      MPI_BYTE,
+                      neighbor_rank,
+                      0,
+                      MPI_COMM_WORLD,
+                      &send_req);
+
+            requests.push_back(recv_req);
+            requests.push_back(send_req);
+        }
+        send_ghost_data.push_back(sendg);
+        recv_ghost_data.push_back(recvg);
     }
-    const is::Field &field = it->second;
-    brick.voxel_data = field.array;
-    brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
-    brick.bounds = box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
-                         vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
-    brick.full_dims = brick.dims;
-    // TODO: This is assuming the sim isn't giving us ghost zone data
-    brick.ghost_bounds = brick.bounds;
-    const vec3f spacing = brick.bounds.size() / vec3f(brick.dims);
-    config["spacing"] = {spacing.x, spacing.y, spacing.z};
 
-    brick.brick = cpp::Volume("structured_regular");
-    brick.brick.setParam("dimensions", brick.full_dims);
-    brick.brick.setParam("gridSpacing", spacing);
+    MPI_Waitall(requests.size(), requests.data(), MPI_STATUS_IGNORE);
 
-    const size_t n_voxels = brick.dims.long_product();
-    cpp::Data osp_data;
-    if (field.dataType == UINT8) {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             static_cast<const uint8_t *>(brick.voxel_data->data()),
-                             true);
-        config["type"] = "uint8";
-    } else if (field.dataType == FLOAT) {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             static_cast<const float *>(brick.voxel_data->data()),
-                             true);
-        config["type"] = "float32";
-    } else if (field.dataType == DOUBLE) {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             static_cast<const double *>(brick.voxel_data->data()),
-                             true);
-        config["type"] = "float64";
-    } else {
-        std::cerr << "[error]: Unsupported voxel type\n";
-        throw std::runtime_error("[error]: Unsupported voxel type");
-    }
-    brick.brick.setParam("data", osp_data);
+    std::vector<VolumeBrick> bricks;
+    for (size_t i = 0; i < regions.size(); ++i) {
+        const auto &region = regions[i];
+        const auto it = region.fields.find(field_name);
+        if (it == region.fields.end()) {
+            std::cerr << "[error]: Requested field " << field_name
+                      << " was not found in the simulation\n";
+            throw std::runtime_error("[error]: Field not found");
+        }
 
-    // If the value range wasn't provided, compute it
-    if (config.find("value_range") == config.end()) {
+        const is::Field &field = it->second;
+        const SimBrick &sim_brick = sim_grid.bricks[i];
+
+        VolumeBrick brick;
+        brick.dims = vec3i(field.dims[0], field.dims[1], field.dims[2]);
+        brick.bounds =
+            box3f(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
+                  vec3f(region.local.max.x, region.local.max.y, region.local.max.z));
+        const vec3f spacing = brick.bounds.size() / vec3f(brick.dims);
+        std::cout << "spacing: " << spacing << "\n";
+        config["spacing"] = {spacing.x, spacing.y, spacing.z};
+
+        vec3i local_data_start(0);
+        brick.full_dims = brick.dims;
+        brick.ghost_bounds = brick.bounds;
+        for (int j = 0; j < 3; ++j) {
+            if (send_ghost_data[i].ghost_faces[j] & NEG_FACE) {
+                brick.full_dims[j] += 1;
+                local_data_start[j] += 1;
+                brick.ghost_bounds.lower[j] -= spacing[j];
+            }
+            if (send_ghost_data[i].ghost_faces[j] & POS_FACE) {
+                brick.full_dims[j] += 1;
+                brick.ghost_bounds.upper[j] += spacing[j];
+            }
+        }
+        std::cout << "brick bounds: " << brick.bounds << ", ghost: " << brick.ghost_bounds
+                  << "\n";
+        std::cout << "full dims: " << brick.full_dims << "\n";
+
+        // TODO: Now we need to allocate a buffer with enough room for the ghost
+        // data and copy everything in
+        const size_t n_voxels = brick.full_dims.long_product();
+        brick.voxel_data = std::make_shared<is::OwnedArray>(n_voxels * field.array->stride(),
+                                                            field.array->stride());
+        memcpy3d(brick.voxel_data->data(),
+                 field.array->data(),
+                 vec3i(0),
+                 local_data_start,
+                 brick.dims,
+                 brick.dims,
+                 brick.full_dims,
+                 field.dataType);
+
+        // TODO: Copy in the ghost faces we received
+
+        brick.brick = cpp::Volume("structured_regular");
+        brick.brick.setParam("dimensions", brick.full_dims);
+        brick.brick.setParam("gridSpacing", spacing);
+
+        cpp::Data osp_data;
         if (field.dataType == UINT8) {
-            brick.value_range = compute_value_range(
-                reinterpret_cast<uint8_t *>(brick.voxel_data->data()), n_voxels);
+            osp_data = cpp::Data(vec3ul(brick.full_dims),
+                                 static_cast<const uint8_t *>(brick.voxel_data->data()),
+                                 true);
+            config["type"] = "uint8";
         } else if (field.dataType == FLOAT) {
-            brick.value_range = compute_value_range(
-                reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
+            osp_data = cpp::Data(vec3ul(brick.full_dims),
+                                 static_cast<const float *>(brick.voxel_data->data()),
+                                 true);
+            config["type"] = "float32";
         } else if (field.dataType == DOUBLE) {
-            brick.value_range = compute_value_range(
-                reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
+            osp_data = cpp::Data(vec3ul(brick.full_dims),
+                                 static_cast<const double *>(brick.voxel_data->data()),
+                                 true);
+            config["type"] = "float64";
         } else {
             std::cerr << "[error]: Unsupported voxel type\n";
             throw std::runtime_error("[error]: Unsupported voxel type");
         }
-    } else {
-        brick.value_range = get_vec<float, 2>(config["value_range"]);
-    }
+        brick.brick.setParam("data", osp_data);
 
-    // Set the clipping box of the volume to clip off the ghost voxels
-    brick.brick.setParam("volumeClippingBoxLower", brick.bounds.lower);
-    brick.brick.setParam("volumeClippingBoxUpper", brick.bounds.upper);
-    brick.brick.commit();
-    return brick;
+        // If the value range wasn't provided, compute it
+        if (config.find("value_range") == config.end()) {
+            if (field.dataType == UINT8) {
+                brick.value_range = compute_value_range(
+                    reinterpret_cast<uint8_t *>(brick.voxel_data->data()), n_voxels);
+            } else if (field.dataType == FLOAT) {
+                brick.value_range = compute_value_range(
+                    reinterpret_cast<float *>(brick.voxel_data->data()), n_voxels);
+            } else if (field.dataType == DOUBLE) {
+                brick.value_range = compute_value_range(
+                    reinterpret_cast<double *>(brick.voxel_data->data()), n_voxels);
+            } else {
+                std::cerr << "[error]: Unsupported voxel type\n";
+                throw std::runtime_error("[error]: Unsupported voxel type");
+            }
+        } else {
+            brick.value_range = get_vec<float, 2>(config["value_range"]);
+        }
+
+        // Set the clipping box of the volume to clip off the ghost voxels
+        brick.brick.setParam("volumeClippingBoxLower", brick.bounds.lower);
+        brick.brick.setParam("volumeClippingBoxUpper", brick.bounds.upper);
+        brick.brick.commit();
+        bricks.push_back(brick);
+    }
+    return bricks;
 }
 
 std::vector<Camera> load_cameras(const std::vector<json> &camera_set,

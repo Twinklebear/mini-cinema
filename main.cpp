@@ -281,12 +281,6 @@ void render_images(const std::vector<std::string> &args)
         if (config.find("field") != config.end()) {
             const std::string field_name = config["field"].get<std::string>();
             bricks = load_volume_bricks(config, regions, mpi_rank, mpi_size);
-
-            for (auto &region : regions) {
-                if (region.fields.find(field_name) != region.fields.end()) {
-                    bricks.push_back(load_volume_brick(config, region, mpi_rank, mpi_size));
-                }
-            }
         }
 
         auto particle_bricks = load_particle_bricks(regions, particle_radius);

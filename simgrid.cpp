@@ -1,8 +1,32 @@
 #include "simgrid.h"
+#include <iterator>
 #include <algorithm>
 #include <mpi.h>
 
 SimBrick::SimBrick(const box3f &b, int owner) : bounds(b), id(-1), owner(owner) {}
+
+int SimGrid::brick_owner(const vec3i &id) const
+{
+    auto fnd = std::find_if(
+        bricks.begin(), bricks.end(), [&](const SimBrick &b) { return b.id == id; });
+    if (fnd != bricks.end()) {
+        return fnd->owner;
+    }
+    std::cout << "No owner for brick " << id << " was found!\n";
+    throw std::runtime_error("No owner for brick!");
+    return -1;
+}
+
+const SimBrick &SimGrid::brick_at(const box3f &bounds) const
+{
+    auto fnd = std::find_if(
+        bricks.begin(), bricks.end(), [&](const SimBrick &b) { return b.bounds == bounds; });
+    if (fnd != bricks.end()) {
+        return *fnd;
+    }
+    std::cout << "No brick at " << bounds << " was found!\n";
+    throw std::runtime_error("No brick at position!");
+}
 
 std::ostream &operator<<(std::ostream &os, const SimGrid &sg)
 {
@@ -70,7 +94,8 @@ SimGrid reconstruct_grid(const std::vector<is::SimState> &regions,
                 brick_id.x = 0;
                 brick_id.y = 0;
                 ++brick_id.z;
-            } else if (sim_grid.bricks[i + 1].bounds.lower.y > sim_grid.bricks[i].bounds.lower.y) {
+            } else if (sim_grid.bricks[i + 1].bounds.lower.y >
+                       sim_grid.bricks[i].bounds.lower.y) {
                 brick_id.x = 0;
                 ++brick_id.y;
             } else {

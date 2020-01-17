@@ -21,6 +21,10 @@ struct SimBrick {
 struct SimGrid {
     std::vector<SimBrick> bricks;
     vec3i grid = vec3i(0);
+
+    int brick_owner(const vec3i &id) const;
+
+    const SimBrick &brick_at(const box3f &bounds) const;
 };
 
 std::ostream &operator<<(std::ostream &os, const SimGrid &sg);

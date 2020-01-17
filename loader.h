@@ -36,6 +36,20 @@ struct VolumeBrick {
     std::shared_ptr<is::Array> voxel_data;
 };
 
+using DataArray = std::shared_ptr<std::vector<uint8_t>>;
+
+struct GhostData {
+    vec3i ghost_faces = vec3i(NEITHER_FACE);
+    // Faces are -/+x, -/+y, -/+z
+    std::array<DataArray, 6> faces = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    // Note: just doing faces to start, edges/corners likely not visible
+    // std::array<std::shared_ptr<std::vector<uint8_t>>, 12> edges;
+    // std::array<std::shared_ptr<std::vector<uint8_t>>, 8> corners;
+
+    GhostData() = default;
+    GhostData(const vec3i &brick_id, const vec3i &grid, const is::Field &field);
+};
+
 struct ParticleBrick {
     // Particle geometry
     cpp::Geometry geom;
@@ -76,17 +90,12 @@ vec3i compute_grid(int num);
 /* Compute which faces of this brick we need to specify ghost voxels
  * for to have correct interpolation at brick boundaries.
  */
-std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid);
+vec3i compute_ghost_faces(const vec3i &brick_id, const vec3i &grid);
 
 std::vector<VolumeBrick> load_volume_bricks(json &config,
                                             const std::vector<is::SimState> &regions,
                                             const int mpi_rank,
                                             const int mpi_size);
-
-VolumeBrick load_volume_brick(json &config,
-                              const is::SimState &region,
-                              const int mpi_rank,
-                              const int mpi_size);
 
 std::vector<Camera> load_cameras(const std::vector<json> &camera_set,
                                  const box3f &world_bounds);
