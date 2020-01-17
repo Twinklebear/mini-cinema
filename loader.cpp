@@ -7,6 +7,7 @@
 #include "json.hpp"
 #include "stb_image.h"
 #include "util.h"
+#include "simgrid.h"
 
 #ifdef VTK_FOUND
 #include <vtkDoubleArray.h>
@@ -67,6 +68,19 @@ std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid)
     }
     return faces;
 }
+
+std::vector<VolumeBrick> load_volume_bricks(json &config,
+                              const std::vector<is::SimState> &regions,
+                              const int mpi_rank,
+                              const int mpi_size)
+{
+    std::vector<VolumeBrick> bricks;
+    SimGrid sim_grid = reconstruct_grid(regions, mpi_rank, mpi_size);
+    std::cout << sim_grid << "\n";
+
+    return bricks;
+}
+
 
 VolumeBrick load_volume_brick(json &config,
                               const is::SimState &region,

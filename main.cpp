@@ -126,7 +126,7 @@ int main(int argc, char **argv)
     }
 
     ospShutdown();
-    //MPI_Finalize();
+    // MPI_Finalize();
     return 0;
 }
 
@@ -278,9 +278,11 @@ void render_images(const std::vector<std::string> &args)
         }
 
         std::vector<VolumeBrick> bricks;
-        for (auto &region : regions) {
-            if (config.find("field") != config.end()) {
-                const std::string field_name = config["field"].get<std::string>();
+        if (config.find("field") != config.end()) {
+            const std::string field_name = config["field"].get<std::string>();
+            bricks = load_volume_bricks(config, regions, mpi_rank, mpi_size);
+
+            for (auto &region : regions) {
                 if (region.fields.find(field_name) != region.fields.end()) {
                     bricks.push_back(load_volume_brick(config, region, mpi_rank, mpi_size));
                 }

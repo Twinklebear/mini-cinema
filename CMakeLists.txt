@@ -16,7 +16,8 @@ add_executable(mini_cinema
     main.cpp
     loader.cpp
     util.cpp
-    profiling.cpp)
+    profiling.cpp
+    simgrid.cpp)
 
 set_target_properties(mini_cinema PROPERTIES
     CXX_STANDARD 11

@@ -17,6 +17,8 @@ using namespace ospcommon;
 using namespace ospcommon::math;
 using json = nlohmann::json;
 
+enum GhostFace { NEITHER_FACE = 0, POS_FACE = 1, NEG_FACE = 2 };
+
 struct VolumeBrick {
     // the volume data itself
     cpp::Volume brick;
@@ -71,12 +73,15 @@ bool compute_divisor(int x, int &divisor);
  */
 vec3i compute_grid(int num);
 
-enum GhostFace { NEITHER_FACE = 0, POS_FACE = 1, NEG_FACE = 2 };
-
 /* Compute which faces of this brick we need to specify ghost voxels
  * for to have correct interpolation at brick boundaries.
  */
 std::array<int, 3> compute_ghost_faces(const vec3i &brick_id, const vec3i &grid);
+
+std::vector<VolumeBrick> load_volume_bricks(json &config,
+                                            const std::vector<is::SimState> &regions,
+                                            const int mpi_rank,
+                                            const int mpi_size);
 
 VolumeBrick load_volume_brick(json &config,
                               const is::SimState &region,
