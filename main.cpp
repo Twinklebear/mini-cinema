@@ -222,7 +222,7 @@ void render_images(const std::vector<std::string> &args)
         particle_radius = config["particle_radius"].get<float>();
     }
 
-    cpp::Material material("scivis", "default");
+    cpp::Material material("scivis", "obj");
     if (config.find("isosurface_color") != config.end()) {
         auto color = config["isosurface_color"].get<std::vector<float>>();
         material.setParam("Kd", vec3f(color[0], color[1], color[2]));
@@ -234,7 +234,7 @@ void render_images(const std::vector<std::string> &args)
     }
     material.commit();
 
-    cpp::Material particle_mat("scivis", "default");
+    cpp::Material particle_mat("scivis", "obj");
     {
         auto texture = load_texture(config["colormap"][0].get<std::string>());
         particle_mat.setParam("Kd", vec3f(1.f));
@@ -253,8 +253,8 @@ void render_images(const std::vector<std::string> &args)
     if (config.find("background_color") != config.end()) {
         renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
     }
-    if (config.find("spp") != config.end()) {
-        renderer.setParam("spp", config["spp"].get<int>());
+    if (config.find("pixelSamples") != config.end()) {
+        renderer.setParam("pixelSamples", config["spp"].get<int>());
     }
     if (config.find("ao") != config.end()) {
         renderer.setParam("aoSamples", config["ao"].get<int>());

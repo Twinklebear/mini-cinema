@@ -94,7 +94,7 @@ VolumeBrick load_volume_brick(json &config,
     const vec3f spacing = brick.bounds.size() / vec3f(brick.dims);
     config["spacing"] = {spacing.x, spacing.y, spacing.z};
 
-    brick.brick = cpp::Volume("structured_regular");
+    brick.brick = cpp::Volume("structuredRegular");
     brick.brick.setParam("dimensions", brick.full_dims);
     brick.brick.setParam("gridSpacing", spacing);
 
@@ -194,7 +194,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         }
         stbi_image_free(data);
 
-        cpp::TransferFunction tfn("piecewise_linear");
+        cpp::TransferFunction tfn("piecewiseLinear");
         tfn.setParam("color", cpp::Data(colors));
         tfn.setParam("opacity", cpp::Data(opacities));
         tfn.setParam("valueRange", value_range);
