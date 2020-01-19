@@ -126,7 +126,7 @@ int main(int argc, char **argv)
     }
 
     ospShutdown();
-    //MPI_Finalize();
+    // MPI_Finalize();
     return 0;
 }
 
@@ -270,7 +270,22 @@ void render_images(const std::vector<std::string> &args)
             break;
         }
         // Query the data from the simulation
-        auto regions = is::client::query();
+        bool sim_quit = false;
+        auto regions = is::client::query(&sim_quit);
+        {
+            // Check that the sim didn't quit and everyone got regions
+            int num_regions = sim_quit ? 0 : regions.size();
+            int global_min_regions = 0;
+            MPI_Allreduce(
+                &num_regions, &global_min_regions, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+            if (global_min_regions == 0) {
+                if (mpi_rank == 0) {
+                    std::cout << "One or more ranks received 0 regions or were told the sim "
+                                 "quit! Exiting\n";
+                }
+                break;
+            }
+        }
 
         auto start = high_resolution_clock::now();
         if (mpi_rank == 0) {
