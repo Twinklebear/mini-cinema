@@ -251,9 +251,9 @@ void render_images(const std::vector<std::string> &args)
     cpp::Renderer renderer("mpi_raycast");
     renderer.setParam("light", cpp::Data(ambient_light));
     if (config.find("background_color") != config.end()) {
-        renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
+        renderer.setParam("backgroundColor", get_vec<float, 3>(config["background_color"]));
     }
-    if (config.find("pixelSamples") != config.end()) {
+    if (config.find("spp") != config.end()) {
         renderer.setParam("pixelSamples", config["spp"].get<int>());
     }
     if (config.find("ao") != config.end()) {
