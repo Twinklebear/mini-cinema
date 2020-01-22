@@ -26,6 +26,8 @@ using namespace ospcommon::math;
 using namespace std::chrono;
 using json = nlohmann::json;
 
+#define CINEMA_PING rank_log_out << __PRETTY_FUNCTION__ << ":" << __LINE__ << "\n" << std::flush
+
 int mpi_rank = 0;
 int mpi_size = 0;
 box3f world_bounds;
@@ -209,7 +211,11 @@ void render_images(const std::vector<std::string> &args)
             if (i == mpi_rank) {
                 std::cout << "rank " << mpi_rank << "/" << mpi_size << " on " << hostname
                           << "\n"
-                          << get_file_content("/proc/self/status") << "\n=========\n"
+                          << "/proc/self/status:\n"
+                          << get_file_content("/proc/self/status")
+                          << "/proc/meminfo:\n"
+                          << get_file_content("/proc/meminfo")
+                          << "\n=========\n"
                           << std::flush;
             }
             MPI_Barrier(MPI_COMM_WORLD);
@@ -262,6 +268,10 @@ void render_images(const std::vector<std::string> &args)
     renderer.setParam("volumeSamplingRate", 1.f);
     renderer.commit();
 
+    std::string rank_log_file = "mini-cinema-libis-rank-" + std::to_string(mpi_rank)
+        + ".txt";
+    std::ofstream rank_log_out(rank_log_file.c_str());
+
     const std::string fmt_string =
         "%0" + std::to_string(static_cast<int>(std::log10(num_queries)) + 1) + "d";
     std::string fmt_out_buf(static_cast<int>(std::log10(num_queries)) + 1, '0');
@@ -269,6 +279,7 @@ void render_images(const std::vector<std::string> &args)
         if (!is::client::sim_connected()) {
             break;
         }
+        CINEMA_PING;
         // Query the data from the simulation
         bool sim_quit = false;
         auto regions = is::client::query(&sim_quit);
@@ -291,7 +302,16 @@ void render_images(const std::vector<std::string> &args)
         if (mpi_rank == 0) {
             std::cout << "Beginning rendering\n";
         }
+        
+        rank_log_out << "Timestep " << t << "\n"
+            << "/proc/self/status:\n"
+            << get_file_content("/proc/self/status")
+            << "/proc/meminfo:\n"
+            << get_file_content("/proc/meminfo")
+            << "\n=========\n"
+            << std::flush;
 
+        CINEMA_PING;
         std::vector<VolumeBrick> bricks;
         for (auto &region : regions) {
             if (config.find("field") != config.end()) {
@@ -301,6 +321,7 @@ void render_images(const std::vector<std::string> &args)
                 }
             }
         }
+        CINEMA_PING;
 
         auto particle_bricks = load_particle_bricks(regions, particle_radius);
         std::vector<cpp::GeometricModel> particle_models;
@@ -310,6 +331,7 @@ void render_images(const std::vector<std::string> &args)
             gm.commit();
             particle_models.push_back(gm);
         }
+        CINEMA_PING;
 
         world_bounds = box3f(
             vec3f(regions[0].world.min.x, regions[0].world.min.y, regions[0].world.min.z),
@@ -341,6 +363,7 @@ void render_images(const std::vector<std::string> &args)
             }
             config["value_range"] = {global_value_range.x, global_value_range.y};
         }
+        CINEMA_PING;
 
         std::vector<std::vector<Isosurface>> isosurfaces;
         std::vector<cpp::TransferFunction> colormaps;
@@ -361,6 +384,7 @@ void render_images(const std::vector<std::string> &args)
                 }
             }
         }
+        CINEMA_PING;
 
         const auto camera_set =
             load_cameras(config["camera"].get<std::vector<json>>(), world_bounds);
@@ -397,6 +421,7 @@ void render_images(const std::vector<std::string> &args)
                     instances.push_back(instance);
                     region_bounds.push_back(b.bounds);
                 }
+                CINEMA_PING;
 
                 // The particle positions from the lammps example are global, so we dump
                 // them all in a single group and instance together
@@ -418,6 +443,7 @@ void render_images(const std::vector<std::string> &args)
                                        [](const ParticleBrick &pb) { return pb.bounds; });
                     }
                 }
+                CINEMA_PING;
 
                 cpp::World world;
                 world.setParam("instance", cpp::Data(instances));
@@ -444,17 +470,21 @@ void render_images(const std::vector<std::string> &args)
                         renderer, camera, world, img_size, fname));
                     process_finished_renders(active_renders, tasks);
 
+                    CINEMA_PING;
+                    rank_log_out << fname << "\n" << std::flush;
                     while (active_renders.size() >= frames_in_flight) {
                         process_finished_renders(active_renders, tasks);
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
                 }
+                CINEMA_PING;
             }
         }
         while (!active_renders.empty()) {
             process_finished_renders(active_renders, tasks);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        CINEMA_PING;
         auto end = high_resolution_clock::now();
         if (mpi_rank == 0) {
             std::cout << "All renders completed in "
