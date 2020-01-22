@@ -333,7 +333,7 @@ bool operator<(const LAMMPSParticle &a, const LAMMPSParticle &b)
 }
 
 ParticleBrick::ParticleBrick(const is::SimState &region)
-    : geom("spheres"),
+    : geom("sphere"),
       num_particles(region.particles.numParticles),
       bounds(vec3f(region.local.min.x, region.local.min.y, region.local.min.z),
              vec3f(region.local.max.x, region.local.max.y, region.local.max.z)),
