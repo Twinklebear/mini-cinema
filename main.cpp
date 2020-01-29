@@ -108,7 +108,7 @@ int main(int argc, char **argv)
 
     {
         ospLoadModule("mpi");
-        cpp::Device device("mpi_distributed");
+        cpp::Device device("mpiDistributed");
         device.commit();
         device.setCurrent();
 
@@ -198,10 +198,10 @@ void render_images(const std::vector<std::string> &args)
     cpp::Light ambient_light("ambient");
     ambient_light.commit();
 
-    cpp::Renderer renderer("mpi_raycast");
+    cpp::Renderer renderer("mpiRaycast");
     renderer.setParam("light", cpp::Data(ambient_light));
     if (config.find("background_color") != config.end()) {
-        renderer.setParam("bgColor", get_vec<float, 3>(config["background_color"]));
+        renderer.setParam("backgroundColor", get_vec<float, 3>(config["background_color"]));
     }
     if (config.find("spp") != config.end()) {
         renderer.setParam("spp", config["spp"].get<int>());
@@ -223,7 +223,7 @@ void render_images(const std::vector<std::string> &args)
         isosurfaces = extract_isosurfaces(config, brick, mpi_rank, isosurface_full_volume);
     }
 
-    cpp::Material material("scivis", "default");
+    cpp::Material material("scivis", "obj");
     if (config.find("isosurface_color") != config.end()) {
         auto color = config["isosurface_color"].get<std::vector<float>>();
         material.setParam("Kd", vec3f(color[0], color[1], color[2]));
@@ -275,7 +275,7 @@ void render_images(const std::vector<std::string> &args)
 
             cpp::World world;
             world.setParam("instance", cpp::Data(instance));
-            world.setParam("regions", cpp::Data(brick.bounds));
+            world.setParam("region", cpp::Data(brick.bounds));
             world.commit();
 
             for (size_t i = 0; i < camera_set.size(); ++i) {

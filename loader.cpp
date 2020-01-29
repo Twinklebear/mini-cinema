@@ -180,9 +180,6 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         config["value_range"] = {global_value_range.x, global_value_range.y};
     }
 
-    // Set the clipping box of the volume to clip off the ghost voxels
-    brick.brick.setParam("volumeClippingBoxLower", brick.bounds.lower);
-    brick.brick.setParam("volumeClippingBoxUpper", brick.bounds.upper);
     brick.brick.commit();
     return brick;
 }
@@ -213,7 +210,7 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
 {
     std::vector<cpp::TransferFunction> colormaps;
     for (const auto &f : files) {
-        cpp::TransferFunction tfn("piecewise_linear");
+        cpp::TransferFunction tfn("piecewiseLinear");
         int x, y, n;
         uint8_t *data = stbi_load(f.c_str(), &x, &y, &n, 4);
         if (!data) {
