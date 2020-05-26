@@ -11,12 +11,14 @@ if len(sys.argv) != 2:
     print("The dataset name should be all lowercase and without spaces to match the website")
     sys.exit(1)
 
-r = requests.get("http://sci.utah.edu/~klacansky/cdn/open-scivis-datasets/{}/{}.json".format(sys.argv[1], sys.argv[1]))
+r = requests.get("https://klacansky.com/open-scivis-datasets/data_sets.json")
+index = r.json()
+meta = [x for x in index if x["name"].lower() == sys.argv[1]][0]
+print(json.dumps(meta, indent=4))
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 work_path = os.getcwd()
 
-meta = r.json()
 volume_path = urlparse(meta["url"])
 meta["volume"] = os.path.normpath(work_path + "/" + os.path.basename(volume_path.path))
 
