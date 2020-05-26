@@ -104,7 +104,7 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         }
     }
 
-    brick.brick = cpp::Volume("structured_regular");
+    brick.brick = cpp::Volume("structuredRegular");
     brick.brick.setParam("dimensions", brick.full_dims);
     brick.brick.setParam("gridSpacing", spacing);
 
