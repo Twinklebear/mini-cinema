@@ -14,6 +14,10 @@
 #include "profiling.h"
 #include "util.h"
 
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX MAXHOSTNAMELEN
+#endif
+
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
