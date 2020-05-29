@@ -11,8 +11,8 @@
 #include "json.hpp"
 
 using namespace ospray;
-using namespace ospcommon;
-using namespace ospcommon::math;
+using namespace rkcommon;
+using namespace rkcommon::math;
 using json = nlohmann::json;
 
 struct VolumeBrick {

@@ -24,7 +24,7 @@ set_target_properties(mini_cinema PROPERTIES
 
 target_link_libraries(mini_cinema PUBLIC
     ospray::ospray
-    ospcommon::ospcommon
+    rkcommon::rkcommon
     MPI::MPI_CXX
     TBB::tbb)
 

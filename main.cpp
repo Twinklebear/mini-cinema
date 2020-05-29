@@ -20,8 +20,8 @@
 #include "stb_image_write.h"
 
 using namespace ospray;
-using namespace ospcommon;
-using namespace ospcommon::math;
+using namespace rkcommon;
+using namespace rkcommon::math;
 using namespace std::chrono;
 using json = nlohmann::json;
 
