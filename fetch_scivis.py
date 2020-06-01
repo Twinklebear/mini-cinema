@@ -61,11 +61,24 @@ with open(args.dataset + "_cinema.json", "w") as f:
     f.write(json.dumps(meta, indent=4))
 
 if not os.path.isfile(meta["volume"]):
-    print("Fetching volume from {}".format(meta["url"]))
-    r = requests.get(meta["url"])
-    data = bytes(r.content)
     with open(os.path.basename(meta["volume"]), "wb") as f:
-        f.write(data)
+        print("Fetching volume from {}".format(meta["url"]))
+        r = requests.get(meta["url"], stream=True)
+        file_size = r.headers.get('content-length')
+
+        if file_size is None:
+            data = bytes(r.content)
+            f.write(data)
+        else:
+            downloaded = 0
+            file_size = int(file_size)
+            for data in r.iter_content(chunk_size=4096):
+                downloaded += len(data)
+                f.write(bytes(data))
+                progress = downloaded / file_size
+                bar = int(50 * progress)
+                sys.stdout.write(f'\r[{"#"*bar}{" "*(50-bar)}] {100*progress:.1f}%')
+                sys.stdout.flush()
 else:
     print("File {} already exists, not re-downloading".format(meta["volume"]))
 
