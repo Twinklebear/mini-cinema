@@ -72,7 +72,7 @@ AsyncRender::AsyncRender(cpp::Renderer renderer,
                          std::string output_file)
     : img_size(img), output_file(output_file)
 {
-    fb = cpp::FrameBuffer(img_size, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
+    fb = cpp::FrameBuffer(img_size.x, img_size.y, OSP_FB_SRGBA, OSP_FB_COLOR | OSP_FB_ACCUM);
     fb.setParam("timeCompositingOverhead", 0);
     fb.commit();
     future = fb.renderFrame(renderer, camera, world);
@@ -203,7 +203,7 @@ void render_images(const std::vector<std::string> &args)
     ambient_light.commit();
 
     cpp::Renderer renderer("mpiRaycast");
-    renderer.setParam("light", cpp::Data(ambient_light));
+    renderer.setParam("light", cpp::CopiedData(ambient_light));
     if (config.find("background_color") != config.end()) {
         renderer.setParam("backgroundColor", get_vec<float, 3>(config["background_color"]));
     }
@@ -264,9 +264,9 @@ void render_images(const std::vector<std::string> &args)
             model.commit();
 
             cpp::Group group;
-            group.setParam("volume", cpp::Data(model));
+            //group.setParam("volume", cpp::CopiedData(model));
             if (geom_model) {
-                group.setParam("geometry", cpp::Data(geom_model));
+                group.setParam("geometry", cpp::CopiedData(geom_model));
             }
             group.commit();
 
@@ -278,8 +278,8 @@ void render_images(const std::vector<std::string> &args)
             instance.commit();
 
             cpp::World world;
-            world.setParam("instance", cpp::Data(instance));
-            world.setParam("region", cpp::Data(brick.bounds));
+            world.setParam("instance", cpp::CopiedData(instance));
+            world.setParam("region", cpp::CopiedData(brick.bounds));
             world.commit();
 
             for (size_t i = 0; i < camera_set.size(); ++i) {

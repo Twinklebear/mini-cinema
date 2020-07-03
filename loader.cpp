@@ -122,21 +122,18 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
                   << duration_cast<milliseconds>(end - start).count() << "ms\n";
     }
 
-    cpp::Data osp_data;
+    cpp::SharedData osp_data;
     if (voxel_type == "uint8") {
-        osp_data = cpp::Data(vec3ul(brick.full_dims), brick.voxel_data->data(), true);
+        osp_data = cpp::SharedData(brick.voxel_data->data(), vec3ul(brick.full_dims));
     } else if (voxel_type == "uint16") {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
-                             true);
+        osp_data = cpp::SharedData(reinterpret_cast<uint16_t *>(brick.voxel_data->data()),
+                                   vec3ul(brick.full_dims));
     } else if (voxel_type == "float32") {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             reinterpret_cast<float *>(brick.voxel_data->data()),
-                             true);
+        osp_data = cpp::SharedData(reinterpret_cast<float *>(brick.voxel_data->data()),
+                                   vec3ul(brick.full_dims));
     } else if (voxel_type == "float64") {
-        osp_data = cpp::Data(vec3ul(brick.full_dims),
-                             reinterpret_cast<double *>(brick.voxel_data->data()),
-                             true);
+        osp_data = cpp::SharedData(reinterpret_cast<double *>(brick.voxel_data->data()),
+                                   vec3ul(brick.full_dims));
     } else {
         std::cerr << "[error]: Unsupported voxel type\n";
         throw std::runtime_error("[error]: Unsupported voxel type");
@@ -232,8 +229,8 @@ std::vector<cpp::TransferFunction> load_colormaps(const std::vector<std::string>
         }
         stbi_image_free(data);
 
-        tfn.setParam("color", cpp::Data(colors));
-        tfn.setParam("opacity", cpp::Data(opacities));
+        tfn.setParam("color", cpp::CopiedData(colors));
+        tfn.setParam("opacity", cpp::CopiedData(opacities));
         tfn.setParam("valueRange", value_range);
         tfn.commit();
         colormaps.push_back(tfn);
@@ -341,8 +338,8 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
         }
 
         cpp::Geometry mesh("mesh");
-        mesh.setParam("vertex.position", cpp::Data(vertices));
-        mesh.setParam("index", cpp::Data(indices));
+        mesh.setParam("vertex.position", cpp::CopiedData(vertices));
+        mesh.setParam("index", cpp::CopiedData(indices));
         mesh.commit();
         isosurfaces.push_back(mesh);
     }

@@ -28,6 +28,9 @@ target_link_libraries(mini_cinema PUBLIC
     MPI::MPI_CXX
     TBB::tbb)
 
+target_compile_definitions(mini_cinema PUBLIC
+    -DOSPRAY_CPP_RKCOMMON_TYPES)
+
 if (${VTK_FOUND})
     target_compile_definitions(mini_cinema PUBLIC -DVTK_FOUND=1)
     target_include_directories(mini_cinema PUBLIC
