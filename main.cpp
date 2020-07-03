@@ -232,7 +232,7 @@ void render_images(const std::vector<std::string> &args)
     cpp::Material material("scivis", "obj");
     if (config.find("isosurface_color") != config.end()) {
         auto color = config["isosurface_color"].get<std::vector<float>>();
-        material.setParam("Kd", vec3f(color[0], color[1], color[2]));
+        material.setParam("kd", vec3f(color[0], color[1], color[2]));
         if (color.size() == 4) {
             material.setParam("d", color[3]);
         }
