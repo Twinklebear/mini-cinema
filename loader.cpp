@@ -74,7 +74,6 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
 
     const std::string volume_file = config["volume"].get<std::string>();
     const vec3i volume_dims = get_vec<int, 3>(config["size"]);
-    const vec3f spacing = get_vec<float, 3>(config["spacing"]);
     const vec3i grid = compute_grid(mpi_size);
     const vec3i brick_id(
         mpi_rank % grid.x, (mpi_rank / grid.x) % grid.y, mpi_rank / (grid.x * grid.y));
@@ -84,7 +83,7 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
     const vec3i brick_lower = brick_id * brick.dims;
     const vec3i brick_upper = brick_id * brick.dims + brick.dims;
 
-    brick.bounds = box3f(vec3f(brick_lower) * spacing, vec3f(brick_upper) * spacing);
+    brick.bounds = box3f(vec3f(brick_lower), vec3f(brick_upper));
 
     brick.full_dims = brick.dims;
     vec3i brick_read_offset = brick_lower;
@@ -94,19 +93,18 @@ VolumeBrick load_volume_brick(json &config, const int mpi_rank, const int mpi_si
         for (size_t i = 0; i < 3; ++i) {
             if (ghost_faces[i] & NEG_FACE) {
                 brick.full_dims[i] += 1;
-                brick.ghost_bounds.lower[i] -= spacing[i];
+                brick.ghost_bounds.lower[i] -= 1;
                 brick_read_offset[i] -= 1;
             }
             if (ghost_faces[i] & POS_FACE) {
                 brick.full_dims[i] += 1;
-                brick.ghost_bounds.upper[i] += spacing[i];
+                brick.ghost_bounds.upper[i] += 1;
             }
         }
     }
 
     brick.brick = cpp::Volume("structuredRegular");
     brick.brick.setParam("dimensions", brick.full_dims);
-    brick.brick.setParam("gridSpacing", spacing);
 
     const std::string voxel_type = config["type"].get<std::string>();
     const size_t n_voxels = brick.full_dims.long_product();
@@ -286,10 +284,8 @@ std::vector<cpp::Geometry> extract_isosurfaces(const json &config,
         throw std::runtime_error("Unrecognized voxel type " + voxel_type_string);
     }
 
-    const vec3f grid_spacing = get_vec<float, 3>(config["spacing"]);
     vtkSmartPointer<vtkImageData> img_data = vtkSmartPointer<vtkImageData>::New();
     img_data->SetDimensions(brick_dims.x, brick_dims.y, brick_dims.z);
-    img_data->SetSpacing(grid_spacing.x, grid_spacing.y, grid_spacing.z);
     // For whole volume iso we need to "untranslate" it so it's placed properly by the
     // instance transform we'll apply later, since I didn't want to add a separate instance
     if (isosurface_full_volume) {

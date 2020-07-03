@@ -86,6 +86,7 @@ bool AsyncRender::finished() const
 void AsyncRender::save_image() const
 {
     uint32_t *img = (uint32_t *)fb.map(OSP_FB_COLOR);
+    stbi_flip_vertically_on_write(1);
     stbi_write_jpg(output_file.c_str(), img_size.x, img_size.y, 4, img, 90);
     fb.unmap(img);
 }
@@ -188,8 +189,9 @@ void render_images(const std::vector<std::string> &args)
 
     VolumeBrick brick = load_volume_brick(config, mpi_rank, mpi_size);
 
-    world_bounds = box3f(
-        vec3f(0), get_vec<float, 3>(config["size"]) * get_vec<float, 3>(config["spacing"]));
+    const vec3f volume_dims = get_vec<float, 3>(config["size"]);
+    world_bounds = box3f(vec3f(0), volume_dims);
+    const vec3f spacing = get_vec<float, 3>(config["spacing"]);
 
     const vec2f value_range = get_vec<float, 2>(config["value_range"]);
     const vec2i img_size = get_vec<int, 2>(config["image_size"]);
@@ -264,7 +266,7 @@ void render_images(const std::vector<std::string> &args)
             model.commit();
 
             cpp::Group group;
-            //group.setParam("volume", cpp::CopiedData(model));
+            // group.setParam("volume", cpp::CopiedData(model));
             if (geom_model) {
                 group.setParam("geometry", cpp::CopiedData(geom_model));
             }
@@ -273,13 +275,19 @@ void render_images(const std::vector<std::string> &args)
             cpp::Instance instance(group);
             // We apply a translation to the instance to place it correctly in
             // the distributed world
-            auto transform = affine3f::translate(brick.ghost_bounds.lower);
-            instance.setParam("xfm", transform);
+            auto transform = affine3f::scale(spacing) * affine3f::translate(vec3f(-0.5f)) *
+                             affine3f::scale(vec3f(1 / volume_dims));
+            auto instance_transform =
+                transform * affine3f::translate(brick.ghost_bounds.lower);
+            instance.setParam("xfm", instance_transform);
             instance.commit();
+
+            box3f clip_bounds(xfmPoint(transform, brick.bounds.lower),
+                              xfmPoint(transform, brick.bounds.upper));
 
             cpp::World world;
             world.setParam("instance", cpp::CopiedData(instance));
-            world.setParam("region", cpp::CopiedData(brick.bounds));
+            world.setParam("region", cpp::CopiedData(clip_bounds));
             world.commit();
 
             for (size_t i = 0; i < camera_set.size(); ++i) {
@@ -288,6 +296,7 @@ void render_images(const std::vector<std::string> &args)
                 camera.setParam("position", camera_set[i].pos);
                 camera.setParam("direction", camera_set[i].dir);
                 camera.setParam("up", camera_set[i].up);
+                camera.setParam("fovy", 50.f);
                 camera.commit();
 
                 std::string fname = prefix + "mini-cinema";
