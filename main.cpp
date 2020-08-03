@@ -264,7 +264,7 @@ void render_images(const std::vector<std::string> &args)
             model.commit();
 
             cpp::Group group;
-            //group.setParam("volume", cpp::CopiedData(model));
+            group.setParam("volume", cpp::CopiedData(model));
             if (geom_model) {
                 group.setParam("geometry", cpp::CopiedData(geom_model));
             }
