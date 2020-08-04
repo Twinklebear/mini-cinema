@@ -5,6 +5,7 @@
 #include <thread>
 #include <mpi.h>
 #include <ospray/ospray.h>
+#include <ospray/ospray_cpp/ext/rkcommon.h>
 #include <ospray/ospray_cpp.h>
 #include <tbb/task_group.h>
 #include <tbb/tbb.h>
@@ -314,7 +315,7 @@ void render_images(const std::vector<std::string> &args)
     }
     ProfilingPoint end;
     if (mpi_rank == 0) {
-        std::cout << "All renders completed in " << elapsed_time_ms(start, end) << "ms\n";
+        std::cout << "All renders completed in " << elapsed_time_ms(start, end) << "ms\n" << std::flush;
     }
     if (detailed_cpu_stats) {
         for (int i = 0; i < mpi_size; ++i) {
