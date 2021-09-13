@@ -5,8 +5,8 @@
 #include <thread>
 #include <mpi.h>
 #include <ospray/ospray.h>
-#include <ospray/ospray_cpp/ext/rkcommon.h>
 #include <ospray/ospray_cpp.h>
+#include <ospray/ospray_cpp/ext/rkcommon.h>
 #include <tbb/task_group.h>
 #include <tbb/tbb.h>
 #include <unistd.h>
@@ -118,7 +118,7 @@ int main(int argc, char **argv)
         device.setCurrent();
 
         // set an error callback to catch any OSPRay errors and exit the application
-        ospDeviceSetErrorFunc(ospGetCurrentDevice(), [](OSPError error, const char *msg) {
+        device.setErrorCallback([](void *, OSPError error, const char *msg) {
             std::cerr << "[OSPRay error]: " << msg << std::endl << std::flush;
             std::exit(error);
         });
@@ -315,7 +315,8 @@ void render_images(const std::vector<std::string> &args)
     }
     ProfilingPoint end;
     if (mpi_rank == 0) {
-        std::cout << "All renders completed in " << elapsed_time_ms(start, end) << "ms\n" << std::flush;
+        std::cout << "All renders completed in " << elapsed_time_ms(start, end) << "ms\n"
+                  << std::flush;
     }
     if (detailed_cpu_stats) {
         for (int i = 0; i < mpi_size; ++i) {

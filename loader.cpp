@@ -5,6 +5,9 @@
 #include <mpi.h>
 #include <ospray/ospray.h>
 #include <ospray/ospray_cpp.h>
+#define OSPRAY_RKCOMMON_DEFINITIONS
+#include <ospray/ospray_cpp/ext/rkcommon.h>
+
 #include "json.hpp"
 #include "stb_image.h"
 #include "util.h"

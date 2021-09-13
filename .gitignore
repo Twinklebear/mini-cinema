@@ -30,3 +30,4 @@ readme.pdf
 premake.local.*
 cmake-build*/
 *.raw
+compile_commands.json
