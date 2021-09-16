@@ -1,6 +1,6 @@
 #!/bin/bash
 
-module restore
+module restore minicinema-dev
 
 if [ -n "$WORK_DIR" ]; then
 	echo "Changing to $WORK_DIR"
@@ -18,9 +18,19 @@ if [ -n "$LOG_PREFIX" ]; then
     export JOB_PREFIX="${LOG_PREFIX}-${JOB_PREFIX}"
 fi
 
-ibrun ./mini_cinema \
+env
+
+mpirun -n ${SLURM_NNODES} -outfile-pattern mini-cinema-${JOB_PREFIX}-rank-%r.txt \
+    ./mini_cinema \
     -prefix $SCRATCH/cinema/${JOB_PREFIX} \
-    -fif 8 \
-    ${JSON_CONFIG} \
-    > ${LOGFILE} 2>&1
+    -fif 1 \
+    -detailed-stats \
+    ${JSON_CONFIG}
+
+#ibrun ./mini_cinema \
+#    -prefix $SCRATCH/cinema/${JOB_PREFIX} \
+#    -fif 1 \
+#    -detailed-stats \
+#    ${JSON_CONFIG} \
+#    > ${LOGFILE} 2>&1
 

@@ -9,10 +9,10 @@ get_logical_cores() {
 }
 
 set_ospray_env_vars() {
-    export I_MPI_PIN_RESPECT_CPUSET=0
-    export I_MPI_PIN_RESPECT_HCA=0
+    #export I_MPI_PIN_RESPECT_CPUSET=0
+    #export I_MPI_PIN_RESPECT_HCA=0
     export I_MPI_PIN_DOMAIN=omp
-    export OSPRAY_SET_AFFINITY=0
+    #export OSPRAY_SET_AFFINITY=0
 
     CPU_MODEL=`cat /proc/cpuinfo | grep "model name" | uniq`
     if [ -z "$OSPRAY_NUM_THREADS" ]; then
@@ -26,15 +26,13 @@ set_ospray_env_vars() {
             export OSPRAY_NUM_THREADS=$(get_physical_cores)
             export I_MPI_PIN_PROCESSOR_LIST=allcores
         fi
+        echo "I_MPI_PIN_PROCESSOR_LIST = $I_MPI_PIN_PROCESSOR_LIST"
+        echo "OSPRAY_NUM_THREADS = $OSPRAY_NUM_THREADS"
     else
         echo "OSPRAY_NUM_THREADS set by user to $OSPRAY_NUM_THREADS"
     fi
 
     export OMP_NUM_THREADS=$OSPRAY_NUM_THREADS
-    source $EMBREE_DIR/embree-vars.sh
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${OSPRAY_DIR}/build/install/lib64/
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${OPENVKL_DIR}/build/install/lib64/
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${OSPCOMMON_DIR}/build/install/lib/
     export MPICH_MAX_THREAD_SAFETY=multiple
 }
 
